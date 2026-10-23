@@ -1,0 +1,27 @@
+# Atualiza os pins por SHA das actions e a imagem base, com quarentena:
+# uma versao so e proposta depois de N dias publicada (incidentes de supply
+# chain costumam ser descobertos e revertidos nesse intervalo).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories: ["/", "/.github/actions/*"]
+    target-branch: dsv
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: /app
+    target-branch: dsv
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: "build"

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "deploy-config.schema.json",
+  "title": ".github/configs/deploy-config.yml",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["defaults", "artifacts"],
+  "properties": {
+    "defaults": { "$ref": "#/$defs/settings", "required": ["driver"] },
+    "accounts": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z][A-Z0-9]{1,9}$" },
+      "additionalProperties": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,19}$" }
+    },
+    "artifacts": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$" },
+      "additionalProperties": { "$ref": "#/$defs/artifact" }
+    },
+    "envs": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z][A-Z0-9]{1,9}$" },
+      "additionalProperties": {
+        "allOf": [{ "$ref": "#/$defs/settings" }],
+        "properties": {
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/artifact" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "properties": {
+        "driver": { "enum": ["kubernetes", "gitops-pr", "ecs"] },
+        "kubernetes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cluster": { "enum": ["kind", "aks", "kubeconfig"] },
+            "resourceGroup": { "type": "string" },
+            "clusterName": { "type": "string" },
+            "namespace": { "type": "string" }
+          }
+        },
+        "gitops": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string" },
+            "branch": { "type": "string", "minLength": 1 },
+            "mode": { "enum": ["pr", "commit"] },
+            "path": { "type": "string" }
+          }
+        },
+        "ecs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cluster": { "type": "string" }
+          }
+        },
+        "artifacts": { "type": "object" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "healthPath": { "type": "string", "pattern": "^/" },
+        "replicas": { "type": "integer", "minimum": 0, "maximum": 50 },
+        "cpu": { "type": "integer", "minimum": 50 },
+        "memory": { "type": "integer", "minimum": 64 },
+        "service": { "type": "string" }
+      }
+    }
+  }
+}

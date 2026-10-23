@@ -1,4 +1,5 @@
 # Camada da aplicacao: reimplanta uma versao ja publicada, sem rebuild.
+# Passa pela mesma verificacao de attestation e pela mesma aprovacao de Environment.
 name: Redeploy
 run-name: ${{ inputs.command }} ${{ inputs.version }} em ${{ inputs.environment }}
 
@@ -19,15 +20,17 @@ on:
         required: true
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
   packages: read
+  attestations: read
   actions: read
   id-token: write
 
 jobs:
   redeploy:
     name: Redeploy
-    uses: ./.github/workflows/pipeline-deploy.yml
+    uses: ./.github/workflows/stage-deploy.yml
     with:
       environments: ${{ inputs.environment }}
       version: ${{ inputs.version }}

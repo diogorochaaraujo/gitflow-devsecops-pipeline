@@ -1,0 +1,32 @@
+defaults:
+  driver: kubernetes
+  kubernetes:
+    cluster: aks
+    resourceGroup: rg-apps-nprd
+    clusterName: aks-apps-nprd
+
+# vars por grupo: AZURE_CLIENT_ID_NPRD, AZURE_SUBSCRIPTION_ID_NPRD, ..._PRD, e AZURE_TENANT_ID
+accounts:
+  DSV: NPRD
+  TST: NPRD
+  HMG: NPRD
+  PRD: PRD
+
+artifacts:
+  api-contratos:
+    containerPort: 8080
+    healthPath: /actuator/health
+    replicas: 2
+    cpu: 500
+    memory: 1024
+
+envs:
+  PRD:
+    kubernetes:
+      cluster: aks
+      resourceGroup: rg-apps-prd
+      clusterName: aks-apps-prd
+    artifacts:
+      api-contratos:
+        replicas: 4
+        memory: 2048

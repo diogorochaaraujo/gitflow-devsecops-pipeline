@@ -1,104 +1,138 @@
-# 04 · Config as code (e onde entra GitOps)
+# 04 · Config as code e GitOps
 
-O repositório da aplicação descreve a si mesmo em três arquivos. A plataforma lê
-esses arquivos a cada execução. Nada de configuração de esteira fica numa
-interface web.
+A aplicação descreve a si mesma em arquivos versionados. A plataforma os valida
+(`schemas/`) e os lê a cada execução. Nenhuma configuração de esteira mora numa
+tela.
 
-## `pipeline.yml`: como construir
-
-| Campo | Para quê |
-|---|---|
-| `env.Name` | nome do artefato: imagem, serviço, stack |
-| `env.Skip*OnSnapshot` | pula um scanner **só no snapshot**. Na release nada é pulado |
-| `build.context` / `build.dockerfile` | onde está o build |
-| `build.test` | comando de teste, roda antes do build |
-| `deploy.SnapshotBranches` | branches que fazem deploy no push |
-| `deploy.SnapshotEnvs` / `StartReleaseEnvs` / `FinishReleaseEnvs` | ambientes de cada momento |
-
-A distribuição de ambientes por momento é uma decisão do time. O padrão é
-`DSV` / `HMG` / `PRD`, mas `StartReleaseEnvs: HMG,PRD` também é válido e leva a
-RC aos dois ambientes já no PR, com aprovação do Environment em PRD. Nesse caso,
-o merge só registra a versão.
-
-## `deploy-config.yml`: onde e como rodar
+## `pipeline.yml`
 
 ```yaml
-serverType: kind          # driver de deploy
-accounts:                 # ambiente -> grupo de contas
-  DSV: NPRD
-  PRD: PRD
-artifacts:                # base, vale para todo ambiente
-  web-api:
-    containerPort: 8080
-    replicas: 1
-envs:                     # sobrescritas por ambiente (merge profundo)
-  PRD:
-    web-api:
-      replicas: 2
+app:
+  name: web-api                 # nome da imagem, do Deployment, do serviço
+
+flow:
+  model: gitflow                # gitflow | trunk
+  integrationBranch: dsv        # só gitflow
+  versioning: label             # label | conventional (trunk exige conventional)
+  environments:
+    snapshot: [DSV]             # gitflow: push na integração
+    candidate: [HMG]            # PR de release (gitflow) ou merge na main (trunk), em ordem
+    release: [PRD]              # depois da promoção
+
+build:
+  stack: python                 # node | python | java | container
+  python:                       # bloco da stack escolhida (obrigatório)
+    version: "3.12"
+    workingDirectory: app
+    install: ""                 # vazio = requirements*.txt / pyproject.toml
+    lint: ruff check .
+    test: python -m unittest discover -v
+  container:                    # sempre: a imagem é o artefato entregue
+    context: app
+    dockerfile: app/Dockerfile
+
+security:
+  skipOnSnapshot: []            # sast | sca | iac | container (nunca vale na candidata)
 ```
 
-O valor efetivo é `artifacts.<a>` com `envs.<ENV>.<a>` por cima. Para ver o
-resultado sem rodar nada:
+| Stack | Bloco | Padrões |
+|---|---|---|
+| `node` | `version`, `workingDirectory`, `packageManager` (`npm`/`pnpm`/`yarn`), `lint`, `test`, `build` | scripts `lint`/`test`/`build` do `package.json` |
+| `python` | `version`, `workingDirectory`, `install`, `lint`, `test` | `pytest` |
+| `java` | `version`, `distribution`, `tool` (`maven`/`gradle`), `workingDirectory`, `test` | `mvn verify` / `gradle build` (wrapper se existir) |
+| `container` | `test` (opcional) | só a imagem; testes dentro do Dockerfile |
+
+**Teste é obrigatório.** Nos módulos `node` e `python`, se não houver teste para
+executar, o build falha (`Nenhum teste: defina ...`). No `java`, o padrão é
+`verify`, que roda os testes. Uma esteira que aceita `-DskipTests` mede
+cobertura de nada.
+
+## `.github/configs/deploy-config.yml`
+
+```yaml
+defaults:                       # vale para todo ambiente
+  driver: kubernetes            # kubernetes | gitops-pr | ecs
+  kubernetes:
+    cluster: kind               # kind | aks | kubeconfig
+  gitops:
+    repository: ""              # vazio = este repositório
+    branch: environments
+    mode: pr                    # pr | commit
+
+accounts:                       # ambiente -> grupo de credenciais
+  DSV: NPRD
+  PRD: PRD
+
+artifacts:                      # base de cada artefato
+  web-api:
+    containerPort: 8080
+    healthPath: /health
+    replicas: 1
+    cpu: 256                    # millicores
+    memory: 512                 # MiB
+
+envs:
+  PRD:
+    driver: gitops-pr           # um ambiente pode trocar de driver
+    artifacts:
+      web-api:
+        replicas: 2
+```
+
+Valor efetivo: **`defaults` ← `envs.<ENV>`** para driver e acesso, e
+**`artifacts.<a>` ← `envs.<ENV>.artifacts.<a>`** para o dimensionamento. Para ver
+sem rodar nada:
 
 ```bash
 scripts/render-deploy-matrix.sh .github/configs/deploy-config.yml DSV,HMG,PRD | jq
 ```
 
-**O que vai em `envs` e não na base:** tudo o que precisa ser *diferente* entre
-ambientes que dividem a mesma conta. O exemplo clássico é a prioridade da regra
-no ALB compartilhado: se ficar na base, DSV, TST e HMG tentam a mesma prioridade
-e o deploy do segundo falha.
-
-No modelo de referência, este arquivo também carrega: dimensionamento da task
-(CPU/memória), health check (caminho, intervalo, carência), regra de roteamento,
-**agenda de liga/desliga** (ambientes não produtivos desligam fora do horário
-comercial) e revisores do ambiente produtivo.
-
-## `security-config.yml` e `.trivyignore.yaml`: o que bloqueia
-
-Detalhe em [05 · DevSecOps](05-devsecops.md).
-
-## Isso é GitOps?
-
-Pelos [princípios do OpenGitOps](https://opengitops.dev/), um sistema é GitOps
-quando o estado desejado é:
-
-| Princípio | Modelo de referência | Este template |
+| Driver | Configuração | Credencial |
 |---|---|---|
-| 1. **declarativo** | ✅ YAML de config, IaC | ✅ |
-| 2. **versionado e imutável** | ✅ git + tags imutáveis + artefato promovido | ✅ |
-| 3. **puxado automaticamente** por um agente | ❌ o pipeline *empurra* (push-based) | ❌ |
-| 4. **reconciliado continuamente** | ❌ drift só aparece no próximo deploy | ❌ |
+| `kubernetes` + `kind` | — | nenhuma (efêmero) |
+| `kubernetes` + `aks` | `resourceGroup`, `clusterName`, `namespace` | vars `AZURE_TENANT_ID`, `AZURE_CLIENT_ID_<GRUPO>`, `AZURE_SUBSCRIPTION_ID_<GRUPO>` (federada) |
+| `kubernetes` + `kubeconfig` | `namespace` | segredo `KUBECONFIG` **do Environment** |
+| `gitops-pr` | `repository`, `branch`, `mode`, `path` | `github.token` (mesmo repo) ou segredo `GITOPS_TOKEN` do Environment |
+| `ecs` | `ecs.cluster` | vars `AWS_REGION`, `AWS_ROLE_ARN_<GRUPO>` (OIDC) |
 
-É **config-as-code com CD push-based**, que é o que a maioria das esteiras
-corporativas sobre ECS/Lambda pratica. Não é ruim: com IaC por stack e
-circuit breaker no serviço, o resultado é previsível. O que falta é detectar
-mudança feita fora do git (console, CLI) entre um deploy e outro.
+Segredos ficam **no Environment**, nunca no repositório: o job de deploy só os
+recebe depois da aprovação daquele ambiente.
 
-### Evolução para pull-based
+## GitOps
 
-Onde o alvo é Kubernetes, o passo natural é separar *construir* de *entregar*:
+Pelos [princípios do OpenGitOps](https://opengitops.dev/), o estado desejado
+precisa ser **declarativo**, **versionado e imutável**, **puxado** por um agente e
+**reconciliado continuamente**.
+
+| Driver | 1 declarativo | 2 versionado | 3 puxado | 4 reconciliado |
+|---|---|---|---|---|
+| `kubernetes` / `ecs` (push) | ✅ | ✅ (tag + digest) | ❌ | ❌ (drift só aparece no próximo deploy) |
+| `gitops-pr` | ✅ | ✅ (o estado guarda o **digest**) | ✅ agente no cluster | ✅ |
+
+Com `gitops-pr`, o pipeline **não tem credencial do cluster**:
 
 ```mermaid
 flowchart LR
-  subgraph CI["esteira (este template)"]
-    B[build + gates] --> REG[(registry)]
-    B --> PRX["PR no repo de ambientes<br/>image: web-api:1.5.0"]
+  subgraph CI["esteira"]
+    B["build + gates<br/>+ attestation"] --> V["verify-artifact"]
+    V --> PR["PR: envs/prd/web-api.yaml<br/>image: web-api@sha256:…"]
   end
-  subgraph ENVREPO["repo de ambientes"]
-    O1[dsv/] & O2[hmg/] & O3[prd/]
-  end
-  PRX --> ENVREPO
-  AG["agente no cluster<br/>(Argo CD / Flux)"] -->|pull + reconcilia| ENVREPO
-  AG --> K8S[(cluster)]
+  PR --> ST[("branch/repo de estado")]
+  AG["Argo CD / Flux<br/>no cluster"] -->|pull + reconcilia| ST
+  AG --> K[(cluster)]
+  POL["admission policy<br/>verifica attestation"] -.-> K
 ```
 
-- o pipeline deixa de ter credencial de deploy. Ele só abre PR num **repositório
-  de ambientes** (um diretório ou overlay por ambiente);
-- o merge desse PR **é** o deploy, e a aprovação de PRD vira review de PR;
-- o agente reconcilia continuamente, e qualquer alteração manual no cluster é
-  revertida ou denunciada.
+- a branch de estado (`environments` por padrão) nasce órfã, só com
+  `envs/<env>/<app>.yaml`, e é o que o Argo CD/Flux observa;
+- `mode: pr`: o merge do PR, revisado por alguém do cliente, **é** o deploy, e o
+  histórico do git é o histórico de produção;
+- `mode: commit`: para ambientes não produtivos, sem revisão;
+- no cluster, uma política de admissão (Sigstore policy-controller ou Kyverno
+  `verifyImages`) pode exigir a mesma attestation. Assim, nem quem tem acesso
+  ao repositório de estado consegue colocar uma imagem arbitrária.
 
-O `pipeline-deploy.yml` deste template é o ponto de troca: um driver `gitops`
-substituiria o `kubectl apply` por "atualizar a tag da imagem no repositório de
-ambientes e abrir PR".
+No laboratório, PRD usa `gitops-pr` na própria branch `environments` deste
+repositório: o PR é aberto e mergeado, mas não há agente aplicando, porque o
+cluster `kind` morre com o runner. Para ver a reconciliação de verdade, aponte
+um Argo CD para `envs/prd` dessa branch.

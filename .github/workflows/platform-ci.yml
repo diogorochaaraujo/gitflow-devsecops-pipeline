@@ -1,0 +1,65 @@
+# CI da propria plataforma: toda mudanca na esteira passa por lint de workflow,
+# analise de seguranca dos workflows, shellcheck, testes dos scripts e validacao
+# dos exemplos. Nao e chamado pelas aplicacoes.
+name: Platform CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/**"
+      - "schemas/**"
+      - "templates/**"
+      - "examples/**"
+  push:
+    branches: [main, dsv]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/**"
+      - "schemas/**"
+      - "templates/**"
+      - "examples/**"
+
+permissions:
+  contents: read
+
+env:
+  ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.30.1@sha256:a2eb396d886c053073405c7a980f2139ba2248ec172243cfa3841e57196e8101
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color
+      - name: zizmor (seguranca dos workflows)
+        run: docker run --rm -v "$PWD:/repo" -w /repo "$ZIZMOR_IMAGE" --offline --min-severity medium .github/
+      - name: shellcheck
+        run: shellcheck scripts/*.sh scripts/governance/*.sh scripts/tests/*.sh
+
+  test:
+    name: Scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Unit Tests
+        run: scripts/tests/run.sh
+      - name: Reusable Permissions
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install --quiet pyyaml==6.0.2
+          "$RUNNER_TEMP/venv/bin/python" scripts/tests/check-permissions.py .
+      - name: Validate Config (app e exemplos)
+        run: |
+          scripts/validate-config.sh .
+          for d in examples/*/; do echo "== $d"; scripts/validate-config.sh "$d"; done

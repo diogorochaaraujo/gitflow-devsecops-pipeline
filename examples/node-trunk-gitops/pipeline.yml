@@ -1,0 +1,24 @@
+# Cenario: frontend Node, trunk-based, versao por Conventional Commits,
+# todos os ambientes entregues por GitOps (Argo CD/Flux no cluster).
+app:
+  name: portal-web
+
+flow:
+  model: trunk
+  versioning: conventional     # feat -> minor, fix -> patch, feat! -> major
+  environments:
+    candidate: [DSV, HMG]      # merge na main: DSV, depois HMG, em ordem
+    release: [PRD]             # apos promover a RC para X.Y.Z (aprovacao no Environment)
+
+build:
+  stack: node
+  node:
+    version: "22"
+    packageManager: pnpm
+    test: pnpm test -- --run
+  container:
+    context: .
+    dockerfile: Dockerfile
+
+security:
+  skipOnSnapshot: []

@@ -1,0 +1,49 @@
+name: deploy-ecs
+description: >-
+  Driver ecs (referencia, nao exercitado pelo laboratorio). Assume o papel de
+  deploy do grupo de contas por OIDC e troca a imagem do servico do ambiente.
+
+inputs:
+  command:
+    default: deploy
+  app:
+    required: true
+  env:
+    required: true
+  version:
+    default: ""
+  image:
+    default: ""
+  config:
+    required: true
+  settings:
+    required: true
+  role-arn:
+    description: valor de vars.AWS_ROLE_ARN_<GRUPO>
+    required: true
+  region:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: ${{ inputs.region }}
+
+    - name: Execute Deploy (ecs)
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        ENV_NAME: ${{ inputs.env }}
+        VERSION: ${{ inputs.version }}
+        IMAGE: ${{ inputs.image }}
+        CONFIG: ${{ inputs.config }}
+        SETTINGS: ${{ inputs.settings }}
+        COMMAND: ${{ inputs.command }}
+      run: |
+        # o cluster vem dos settings do ambiente; o artefato pode sobrescrever
+        CONFIG=$(jq -c --argjson s "$SETTINGS" '{cluster: $s.ecs.cluster} + .' <<<"$CONFIG")
+        export CONFIG
+        "$GITHUB_ACTION_PATH/../../../scripts/deploy-ecs.sh" "$COMMAND"

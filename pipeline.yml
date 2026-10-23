@@ -1,19 +1,27 @@
-# Contrato de build da aplicacao: o que a plataforma precisa saber para
-# construir, testar e entregar este repositorio. Pertence ao time da aplicacao.
-# Detalhe de cada campo em docs/04-config-as-code.md.
-env:
-  Name: web-api                      # nome do artefato (imagem, servico, stack)
-  SkipSastOnSnapshot: false          # pula SAST no snapshot (nunca na release)
-  SkipScaOnSnapshot: false           # pula SCA/IaC no snapshot (nunca na release)
-  SkipContainerScanOnSnapshot: false # pula scan da imagem no snapshot (nunca na release)
+# Contrato da aplicacao com a plataforma: como construir e por qual fluxo entregar.
+# Validado contra schemas/pipeline.schema.json no primeiro job de toda execucao.
+# Referencia de campos: docs/04-config-as-code.md. Outros cenarios: examples/.
+app:
+  name: web-api
+
+flow:
+  model: gitflow              # gitflow | trunk
+  integrationBranch: dsv      # gitflow: branch de integracao
+  versioning: label           # label (Release-Major|Minor|Patch no PR) | conventional (commits)
+  environments:
+    snapshot: [DSV]           # gitflow: push na branch de integracao
+    candidate: [HMG]          # gitflow: PR de release | trunk: merge na main, em ordem
+    release: [PRD]            # depois da promocao da RC para X.Y.Z
 
 build:
-  context: app
-  dockerfile: app/Dockerfile
-  test: python3 -m unittest discover -s app -v
+  stack: python               # node | python | java | container
+  python:
+    version: "3.12"
+    workingDirectory: app
+    test: python -m unittest discover -v
+  container:
+    context: app
+    dockerfile: app/Dockerfile
 
-deploy:
-  SnapshotBranches: dsv              # so estas branches fazem deploy no snapshot
-  SnapshotEnvs: DSV                  # push na branch de integracao
-  StartReleaseEnvs: HMG              # PR de release aberto/atualizado
-  FinishReleaseEnvs: PRD             # PR de release mergeado
+security:
+  skipOnSnapshot: []          # sast | sca | iac | container -- nunca vale na release

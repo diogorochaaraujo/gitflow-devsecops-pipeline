@@ -1,0 +1,139 @@
+# Plataforma / estagio: o ciclo de vida da versao.
+#   stamp   -> tag anotada X.Y.Z-N no commit construido (so depois dos gates)
+#   promote -> X.Y.Z-N vira X.Y.Z: mesma imagem (mesmo digest), tag git e GitHub Release
+name: Stage Release
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: stamp | promote
+        type: string
+        required: true
+      name:
+        type: string
+        required: true
+      version:
+        description: "stamp: versao da RC"
+        type: string
+        default: ""
+      rc:
+        description: "promote: RC a promover (vazio = a que aponta para head-sha)"
+        type: string
+        default: ""
+      head-sha:
+        description: commit construido (cabeca do PR ou push)
+        type: string
+        required: true
+      target-sha:
+        description: "promote: commit que recebe a tag final (merge commit ou push na main)"
+        type: string
+        default: ""
+    outputs:
+      version:
+        value: ${{ jobs.promote.outputs.version }}
+      rc:
+        value: ${{ jobs.promote.outputs.rc }}
+
+permissions:
+  contents: read
+
+jobs:
+  stamp:
+    name: Create Release Stamp
+    if: inputs.mode == 'stamp'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:  # zizmor: ignore[artipacked] -- precisa da credencial para o push da tag; o job nao sobe artefato
+          ref: ${{ inputs.head-sha }}
+      - name: Tag Repository
+        env:
+          VERSION: ${{ inputs.version }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          # re-run do mesmo run_number: a tag ja existe e as tags sao imutaveis
+          existing=$(git ls-remote --tags origin "refs/tags/$VERSION^{}" | cut -f1)
+          if [ -n "$existing" ]; then
+            [ "$existing" = "$HEAD_SHA" ] && { echo "RC $VERSION ja existe neste commit"; exit 0; }
+            echo "::error::A tag $VERSION ja existe em outro commit ($existing)."; exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" "$HEAD_SHA" -m "release candidate $VERSION" -m "run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          git push origin "refs/tags/$VERSION"
+          echo "Release candidate \`$VERSION\` em \`$HEAD_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    name: Promote Artifact
+    if: inputs.mode == 'promote'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      version: ${{ steps.rc.outputs.version }}
+      rc: ${{ steps.rc.outputs.rc }}
+    env:
+      HEAD_SHA: ${{ inputs.head-sha }}
+      TARGET_SHA: ${{ inputs.target-sha || inputs.head-sha }}
+      NAME: ${{ inputs.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:  # zizmor: ignore[artipacked] -- precisa da credencial para o push da tag; o job nao sobe artefato
+          ref: ${{ inputs.target-sha || inputs.head-sha }}
+          fetch-depth: 0
+      - id: rc
+        name: Find Release Candidate
+        env:
+          RC_INPUT: ${{ inputs.rc }}
+        run: |
+          rc=$RC_INPUT
+          if [ -z "$rc" ]; then
+            rc=$(git tag --points-at "$HEAD_SHA" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$' | sort -V | tail -1 || true)
+          fi
+          if [ -z "$rc" ]; then
+            echo "::error::Nenhuma release candidate aponta para $HEAD_SHA. O pipeline da candidata passou neste commit antes do merge?"
+            exit 1
+          fi
+          version=${rc%-*}
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::A versao $version ja foi publicada."
+            exit 1
+          fi
+          echo "RC $rc -> release $version"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Move Artifact to Release
+        env:
+          RC: ${{ steps.rc.outputs.rc }}
+          VERSION: ${{ steps.rc.outputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$NAME"
+          docker buildx imagetools create --tag "$image:$VERSION" "$image:$RC"
+          rc_digest=$(docker buildx imagetools inspect "$image:$RC" --format '{{json .Manifest.Digest}}')
+          new_digest=$(docker buildx imagetools inspect "$image:$VERSION" --format '{{json .Manifest.Digest}}')
+          [ "$rc_digest" = "$new_digest" ] || { echo "::error::Digest mudou na promocao ($rc_digest -> $new_digest)."; exit 1; }
+          echo "Mesmo digest: $new_digest"
+      - name: Generate Release Tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RC: ${{ steps.rc.outputs.rc }}
+          VERSION: ${{ steps.rc.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" "$TARGET_SHA" -m "release $VERSION" -m "promovida de $RC"
+          git push origin "refs/tags/$VERSION"
+          gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes
+          echo "Release \`$VERSION\` (de \`$RC\`)" >> "$GITHUB_STEP_SUMMARY"

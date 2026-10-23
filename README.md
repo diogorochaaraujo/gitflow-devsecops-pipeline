@@ -1,53 +1,76 @@
 # gitflow-devsecops-pipeline
 
-Template e laboratório de um modelo de esteira corporativa em GitHub Actions:
-**workflows centralizados numa camada de plataforma**, repositórios de aplicação
-"finos" que só declaram configuração, gates de segurança, versionamento
-semântico guiado por label e **promoção do mesmo artefato** de DSV até PRD.
+Template **modular** de esteira em GitHub Actions para organizações que
+precisam controlar *como* o código chega à produção, inclusive quando quem
+escreve o código são **vários fornecedores**.
 
-Roda ponta a ponta numa conta pessoal do GitHub, sem nuvem paga: o deploy do
-laboratório sobe um cluster `kind` efêmero dentro do runner.
+- **Um workflow por repositório de aplicação**, que o fornecedor não edita. Toda
+  a lógica mora numa camada de plataforma versionada.
+- **Fluxo escolhido por configuração**: `gitflow` (integração → PR de release com
+  label) ou `trunk` (main + Conventional Commits).
+- **Módulos plugáveis**: build por stack (`node`, `python`, `java`, `container`) e
+  deploy por driver (`kubernetes`, `gitops-pr`, `ecs`).
+- **Gates de segurança** (segredos, SAST, SCA, IaC, imagem, DAST) e um contrato
+  com **schema**, para que erro de configuração falhe em segundos.
+- **Prova de origem**: toda imagem sai com SBOM e attestation assinada, e
+  nenhum deploy aceita imagem que não tenha sido construída pela plataforma.
+- **Promoção do mesmo digest** de DSV até PRD, sem rebuild.
+- **Governança como código** para a organização: regras, política de Actions,
+  OIDC preso ao workflow, entrada e saída de fornecedor.
+
+Roda ponta a ponta numa conta gratuita: o laboratório faz deploy num cluster
+`kind` efêmero e entrega produção por **GitOps** (PR numa branch de estado).
 
 ```mermaid
 flowchart LR
-  F["feature/TASK-1"] -->|push| SN1["Snapshot<br/>build + scan"]
-  F -->|PR + merge| D[dsv]
-  D -->|push| SN2["Snapshot<br/>build + scan + deploy DSV"]
-  D -->|"PR dsv→main<br/>label Release-*"| SR["Start Release<br/>RC X.Y.Z-N + deploy HMG"]
-  SR -->|merge| M[main]
-  M --> FR["Finish Release<br/>promove X.Y.Z + deploy PRD"]
-  FR -->|PR de back-merge| D
+  subgraph APP["repo da aplicação (fornecedor)"]
+    W["ci-cd.yml<br/>(protegido)"] --- C["pipeline.yml<br/>deploy-config.yml"]
+  end
+  subgraph PLAT["plataforma (cliente)"]
+    O["platform.yml<br/>resolve → gates → release → deploy"]
+    M["módulos<br/>build-node · build-python · build-java · build-container<br/>deploy-kubernetes · deploy-gitops-pr · deploy-ecs"]
+    O --> M
+  end
+  subgraph GOV["governança (org)"]
+    R["rulesets · política de Actions<br/>OIDC · custom properties"]
+  end
+  W -->|uses @sha| O
+  R -.impõe.-> APP
+  O -->|imagem + attestation| REG[(registry)]
+  O -->|kubectl / PR de estado| K8S[(Kubernetes)]
 ```
 
 ## Por onde começar
 
 | Quero... | Leia |
 |---|---|
-| entender as duas camadas e por que existem | [01 · Arquitetura](docs/01-arquitetura.md) |
-| entender branches, labels, versões e tags | [02 · Gitflow](docs/02-gitflow.md) |
-| ver cada pipeline job a job | [03 · Pipelines](docs/03-pipelines.md) |
-| entender os arquivos de configuração e onde entra GitOps | [04 · Config as code](docs/04-config-as-code.md) |
-| entender os gates de segurança e as exceções | [05 · DevSecOps](docs/05-devsecops.md) |
+| entender as camadas e o contrato entre elas | [01 · Arquitetura](docs/01-arquitetura.md) |
+| escolher entre gitflow e trunk; versões e tags | [02 · Fluxos](docs/02-fluxos.md) |
+| ver o que roda em cada evento, job a job | [03 · Pipelines](docs/03-pipelines.md) |
+| configurar uma aplicação (`pipeline.yml`, `deploy-config.yml`) | [04 · Config as code e GitOps](docs/04-config-as-code.md) |
+| entender os gates, as attestations e a cadeia de suprimentos | [05 · DevSecOps](docs/05-devsecops.md) |
 | rodar o laboratório do zero | [06 · Laboratório](docs/06-laboratorio.md) |
-| ver o que o modelo de referência pode melhorar | [07 · Melhorias](docs/07-melhorias.md) |
+| as lições do modelo de referência | [07 · Melhorias](docs/07-melhorias.md) |
+| **controlar vários fornecedores na mesma organização** | [08 · Fornecedores](docs/08-fornecedores.md) |
+| criar uma stack, um driver ou um fluxo novo | [09 · Extensão](docs/09-extensao.md) |
 
-## Quem é dono de quê
+## Mapa do repositório
 
-O repositório junta as duas camadas para caber num laboratório. Em produção,
-elas são repositórios separados, mantidos por times diferentes
-([como separar](docs/01-arquitetura.md#separando-as-camadas)).
-
-| Camada | Arquivos | Dono |
+| Camada | Caminho | Dono |
 |---|---|---|
-| **Aplicação** | `app/`, `pipeline.yml`, `.github/configs/`, `.trivyignore.yaml`, `.github/workflows/{snapshot,start-release,finish-release,redeploy}.yml` | time da aplicação |
-| **Plataforma** | `.github/workflows/pipeline-*.yml`, `.github/actions/`, `scripts/`, `templates/` | time de plataforma |
+| **Aplicação** | `app/`, `pipeline.yml`, `.github/configs/`, `.trivyignore.yaml`, `.github/workflows/{ci-cd,redeploy,housekeeping}.yml` | time da aplicação / fornecedor (os workflows, protegidos) |
+| **Plataforma: orquestrador e estágios** | `.github/workflows/platform.yml`, `stage-*.yml`, `ops-*.yml` | time de plataforma |
+| **Plataforma: módulos** | `.github/actions/*`, `scripts/`, `templates/`, `schemas/` | time de plataforma |
+| **Governança** | `governance/`, `scripts/governance/` | administração da organização |
+| **Exemplos** | `examples/` (Node + trunk + GitOps, Java + gitflow + AKS, Python + gitflow + ECS) | — |
 
 ## Validação local
 
-Tudo em Docker, sem instalar nada:
+Em Docker, sem instalar nada:
 
 ```bash
-docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.4          # workflows
-docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 scripts/*.sh
-python3 -m unittest discover -s app -v                                   # testes da app
+scripts/tests/run.sh                                  # testes dos scripts (versão, roteamento, matriz, manifesto)
+scripts/validate-config.sh .                          # pipeline.yml e deploy-config.yml contra o schema
+docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/zizmorcore/zizmor:1.30.1 --offline .github/
 ```

@@ -1,0 +1,17 @@
+# regex (grep -E, sem diferenciar maiusculas)	classe	o que fazer
+commits? atras de	processo	Fazer merge da base na branch do PR (git merge origin/main) e enviar de novo.
+exatamente um label	processo	Colocar um unico label Release-Major, Release-Minor ou Release-Patch no PR.
+Configuracao invalida|is not valid under|Additional properties are not allowed|is a required property	configuracao	Corrigir pipeline.yml ou deploy-config.yml conforme o campo apontado (schemas/).
+gitleaks|leaks found	seguranca	Remover o segredo do historico (reescrever a branch) e revogar a credencial se for real.
+SAST encontrou|semgrep	seguranca	Corrigir o achado ou registrar excecao com prazo; o SARIF do job tem arquivo e linha.
+Total: [1-9]|vulnerabilit	seguranca	Atualizar a dependencia ou a imagem base; excecao com prazo em .trivyignore.yaml.
+Misconfiguration|AVD-	seguranca	Corrigir Dockerfile/manifesto ou registrar excecao com prazo.
+FAILED|AssertionError|Tests run:.*Failures: [1-9]|npm ERR! Test failed|failing	build	Teste quebrado: reproduzir localmente com o mesmo comando de build.test.
+error TS[0-9]+|COMPILATION ERROR|SyntaxError|cannot find symbol	build	Erro de compilacao: o comando de build da stack falha igual localmente.
+nao estabilizou|ProgressDeadlineExceeded|CrashLoopBackOff|ImagePullBackOff	deploy	A aplicacao nao ficou saudavel: ver logs do pod no job; o rollback ja foi feito.
+attestation|signer-workflow|no matching attestations	deploy	Imagem sem prova de origem valida: so implantar imagem construida pela plataforma.
+Smoke test	deploy	A versao que responde nao e a entregue: rollout incompleto ou cache de imagem.
+toomanyrequests|429 Too Many Requests|rate limit	infra	Limite de registry ou API: reexecutar; persistindo, usar espelho de imagens base.
+ETIMEDOUT|ECONNRESET|connection reset|502 Bad Gateway|503 Service Unavailable|i/o timeout	infra	Falha de rede/servico externo, nao de codigo: reexecutar o job.
+The job was canceled|exceeded the maximum execution time	infra	Timeout ou cancelamento: verificar fila de runner ou passo travado.
+Resource not accessible by integration|403|AccessDenied|not authorized	permissao	Permissao do token ou papel OIDC: conferir permissions do workflow e a confianca do papel.

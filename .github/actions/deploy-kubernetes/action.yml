@@ -1,0 +1,108 @@
+name: deploy-kubernetes
+description: >-
+  Driver kubernetes. Obtem acesso ao cluster do ambiente (kind efemero, AKS por
+  OIDC ou kubeconfig do Environment) e aplica o manifesto da plataforma.
+
+inputs:
+  command:
+    default: deploy
+  app:
+    required: true
+  env:
+    required: true
+  version:
+    default: ""
+  image:
+    description: Referencia aplicada no cluster (tag no kind, digest nos demais)
+    default: ""
+  config:
+    required: true
+  settings:
+    description: settings efetivos do ambiente (JSON)
+    required: true
+  registry-token:
+    required: true
+  kubeconfig:
+    description: conteudo do kubeconfig (cluster=kubeconfig; segredo do Environment)
+    default: ""
+  azure-client-id:
+    default: ""
+  azure-tenant-id:
+    default: ""
+  azure-subscription-id:
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - id: target
+      name: Cluster Target
+      shell: bash
+      env:
+        SETTINGS: ${{ inputs.settings }}
+      run: |
+        {
+          echo "cluster=$(jq -r '.kubernetes.cluster // "kind"' <<<"$SETTINGS")"
+          echo "namespace=$(jq -r '.kubernetes.namespace // empty' <<<"$SETTINGS")"
+          echo "rg=$(jq -r '.kubernetes.resourceGroup // empty' <<<"$SETTINGS")"
+          echo "name=$(jq -r '.kubernetes.clusterName // empty' <<<"$SETTINGS")"
+        } >> "$GITHUB_OUTPUT"
+
+    # ---- kind: cluster efemero no runner (laboratorio, testes de integracao) ----
+    - if: steps.target.outputs.cluster == 'kind'
+      uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+      with:
+        cluster_name: lab
+
+    - name: Load Image (kind)
+      if: steps.target.outputs.cluster == 'kind' && inputs.command == 'deploy'
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        TOKEN: ${{ inputs.registry-token }}
+      run: |
+        echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+        docker pull --quiet "$IMAGE"
+        kind load docker-image "$IMAGE" --name lab
+
+    # ---- AKS: identidade federada por grupo de contas, sem segredo guardado ----
+    - if: steps.target.outputs.cluster == 'aks'
+      uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+      with:
+        client-id: ${{ inputs.azure-client-id }}
+        tenant-id: ${{ inputs.azure-tenant-id }}
+        subscription-id: ${{ inputs.azure-subscription-id }}
+
+    - name: AKS Credentials
+      if: steps.target.outputs.cluster == 'aks'
+      shell: bash
+      env:
+        RG: ${{ steps.target.outputs.rg }}
+        NAME: ${{ steps.target.outputs.name }}
+      run: |
+        az aks get-credentials --resource-group "$RG" --name "$NAME" --overwrite-existing
+        command -v kubelogin >/dev/null && kubelogin convert-kubeconfig -l azurecli || true
+
+    # ---- kubeconfig: segredo KUBECONFIG do Environment ----
+    - name: Kubeconfig
+      if: steps.target.outputs.cluster == 'kubeconfig'
+      shell: bash
+      env:
+        KUBECONFIG_CONTENT: ${{ inputs.kubeconfig }}
+        ENV_NAME: ${{ inputs.env }}
+      run: |
+        [ -n "$KUBECONFIG_CONTENT" ] || { echo "::error::Environment $ENV_NAME sem segredo KUBECONFIG."; exit 1; }
+        umask 077; mkdir -p ~/.kube; printf '%s' "$KUBECONFIG_CONTENT" > ~/.kube/config
+
+    - name: Execute Deploy
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        ENV_NAME: ${{ inputs.env }}
+        VERSION: ${{ inputs.version }}
+        IMAGE: ${{ inputs.image }}
+        CONFIG: ${{ inputs.config }}
+        NAMESPACE: ${{ steps.target.outputs.namespace }}
+        EPHEMERAL: ${{ steps.target.outputs.cluster == 'kind' }}
+        COMMAND: ${{ inputs.command }}
+      run: '"$GITHUB_ACTION_PATH/../../../scripts/deploy-kubernetes.sh" "$COMMAND"'
