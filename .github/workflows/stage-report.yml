@@ -31,7 +31,7 @@ permissions:
 jobs:
   audit:
     name: Audit
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       actions: read
@@ -81,7 +81,7 @@ jobs:
     name: Error Analysis
     needs: audit
     if: needs.audit.outputs.failed == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       actions: read

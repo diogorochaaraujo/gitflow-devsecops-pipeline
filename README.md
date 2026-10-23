@@ -21,8 +21,10 @@ escreve o código são **vários fornecedores**.
   migração já publicada não pode ser editada.
 - **Configuração por ambiente** em `config/<artefato>/<env>.env` e **segredos só
   por nome**, resolvidos no cofre do cluster: o pipeline nunca vê o valor.
-- **Quem aprova cada ambiente, como código** (`envs.<ENV>.reviewers`), e release
-  amarrada a um chamado (`flow.changeRef`).
+- **Quem aprova cada ambiente, como código** (`envs.<ENV>.reviewers`), **uma
+  aprovação por ambiente**, e release amarrada a um chamado (`flow.changeRef`).
+- **Política de promoção**: PRD só aceita release publicada, HMG só candidata ou
+  release, e isso vale também para o redeploy manual, antes de qualquer aprovação.
 - **Governança como código** para a organização: regras, política de Actions,
   OIDC preso ao workflow, entrada e saída de fornecedor.
 
@@ -52,6 +54,7 @@ flowchart LR
 
 | Quero... | Leia |
 |---|---|
+| **ver o fluxo inteiro numa página: etapas E0–E12, quem age, o que bloqueia** | [00 · Mapa do processo](docs/00-mapa-do-processo.md) |
 | entender as camadas e o contrato entre elas | [01 · Arquitetura](docs/01-arquitetura.md) |
 | escolher entre gitflow e trunk; versões e tags | [02 · Fluxos](docs/02-fluxos.md) |
 | ver o que roda em cada evento, job a job | [03 · Pipelines](docs/03-pipelines.md) |
@@ -61,6 +64,7 @@ flowchart LR
 | as lições do modelo de referência | [07 · Melhorias](docs/07-melhorias.md) |
 | **controlar vários fornecedores na mesma organização** | [08 · Fornecedores](docs/08-fornecedores.md) |
 | criar uma stack, um driver ou um fluxo novo | [09 · Extensão](docs/09-extensao.md) |
+| evoluir a própria esteira sem quebrar as aplicações | [10 · Plataforma](docs/10-plataforma.md) |
 
 ## Mapa do repositório
 

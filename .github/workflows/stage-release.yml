@@ -42,7 +42,7 @@ jobs:
   stamp:
     name: Create Release Stamp
     if: inputs.mode == 'stamp'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       contents: write
@@ -70,7 +70,7 @@ jobs:
   promote:
     name: Promote Artifact
     if: inputs.mode == 'promote'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: write
