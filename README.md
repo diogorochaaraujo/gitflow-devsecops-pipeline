@@ -77,7 +77,7 @@ flowchart LR
 | Exercitado de ponta a ponta neste repositório | Referência, ainda não exercitado |
 |---|---|
 | fluxo `gitflow` completo: snapshot → DSV → candidata em HMG → promoção com o mesmo digest → PRD por GitOps → back-merge | fluxo `trunk` (roteamento coberto por teste) |
-| recusas em segundos: label, chamado, configuração inválida | driver `ecs`, cluster `aks` e `kubeconfig` |
+| recusas em segundos: label, chamado, migração publicada editada | driver `ecs`, cluster `aks` e `kubeconfig` |
 | attestation no build e **recusa** de imagem sem prova de origem | agente GitOps aplicando a branch de estado (Argo CD/Flux) |
 | Flyway (banco efêmero) antes da API; ConfigMap por ambiente | External Secrets num cluster real |
 | rollback com a configuração da própria versão | governança de organização (`apply-org.sh` só em simulação) |
