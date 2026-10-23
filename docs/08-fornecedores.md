@@ -45,7 +45,10 @@ flowchart TB
 | **ruleset de push** da org: `.github/workflows/**`, `.github/actions/**`, `CODEOWNERS`, `security-config.yml`, `.trivyignore.yaml` bloqueados, com bypass só para a plataforma | 3 | `governance/rulesets/arquivos-plataforma.json` |
 | **ruleset de tags**: só a App de release cria; ninguém move ou apaga | versões confiáveis | `governance/rulesets/tags.json` |
 | plataforma em repositório próprio, pinada por SHA | 3: a esteira que roda é a que o cliente publicou | [01 · Separando as camadas](01-arquitetura.md#separando-as-camadas) |
-| **Environments HMG/PRD** com revisores do cliente e *prevent self-review* | 2 | por repositório (bootstrap) |
+| **Environments HMG/PRD** com revisores do cliente e *prevent self-review* | 2 | `envs.<ENV>.reviewers` no `deploy-config.yml`, aplicado pelo bootstrap |
+| **release cita o chamado** (`flow.changeRef`) | 4: toda entrega do fornecedor aponta para a demanda que a justifica | `pipeline.yml` |
+| **migração publicada imutável** + CODEOWNERS em `db/migrations/` | o dado do cliente não muda sem revisão de quem responde por ele | `check-migrations.sh` |
+| **segredo só por nome** (`secrets: [...]`, valor no cofre do cliente) | o fornecedor entrega sem nunca ver credencial de HMG/PRD | `deploy-config.yml` + External Secrets |
 | **attestation + verify no deploy** | 3: imagem construída fora da esteira não entra | `stage-build` / `verify-artifact` |
 | **OIDC com `job_workflow_ref`** | 3: só o workflow de deploy da plataforma recebe credencial de nuvem | `governance/oidc/` |
 | política de Actions: allowlist, SHA obrigatório, token só leitura, forks sem segredo | 3 + supply chain | `governance/actions-policy.json` |

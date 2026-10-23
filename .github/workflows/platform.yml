@@ -90,7 +90,20 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        run: VERSIONING=$(yq '.flow.versioning' pipeline.yml) .platform/scripts/validate-pr.sh
+          # texto livre do PR: so por env, nunca interpolado no script
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          VERSIONING=$(yq '.flow.versioning' pipeline.yml) \
+          CHANGE_REF=$(yq '.flow.changeRef // ""' pipeline.yml) \
+            .platform/scripts/validate-pr.sh
+
+      - name: Migrations Immutability
+        if: steps.route.outputs.build == 'true'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: .platform/scripts/check-migrations.sh .github/configs/deploy-config.yml "$HEAD_SHA"
 
       - id: prep
         if: steps.route.outputs.build == 'true' || steps.route.outputs.promote == 'true'

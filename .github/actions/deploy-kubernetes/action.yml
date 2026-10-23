@@ -20,6 +20,9 @@ inputs:
   settings:
     description: settings efetivos do ambiente (JSON)
     required: true
+  config-dir:
+    description: pasta config/ da aplicacao (config/<artefato>/<env>.env)
+    default: ""
   registry-token:
     required: true
   kubeconfig:
@@ -46,6 +49,7 @@ runs:
           echo "namespace=$(jq -r '.kubernetes.namespace // empty' <<<"$SETTINGS")"
           echo "rg=$(jq -r '.kubernetes.resourceGroup // empty' <<<"$SETTINGS")"
           echo "name=$(jq -r '.kubernetes.clusterName // empty' <<<"$SETTINGS")"
+          echo "secret-store=$(jq -r '.kubernetes.secretStore // empty' <<<"$SETTINGS")"
         } >> "$GITHUB_OUTPUT"
 
     # ---- kind: cluster efemero no runner (laboratorio, testes de integracao) ----
@@ -104,5 +108,7 @@ runs:
         CONFIG: ${{ inputs.config }}
         NAMESPACE: ${{ steps.target.outputs.namespace }}
         EPHEMERAL: ${{ steps.target.outputs.cluster == 'kind' }}
+        CONFIG_DIR: ${{ inputs.config-dir }}
+        SECRET_STORE: ${{ steps.target.outputs.secret-store }}
         COMMAND: ${{ inputs.command }}
       run: '"$GITHUB_ACTION_PATH/../../../scripts/deploy-kubernetes.sh" "$COMMAND"'

@@ -120,7 +120,14 @@ jobs:
         if: inputs.publish
         env:
           NAME: ${{ inputs.name }}
-        run: echo "repo=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$NAME" >> "$GITHUB_OUTPUT"
+          PIPELINE: ${{ inputs.pipeline }}
+        run: |
+          echo "repo=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$NAME" >> "$GITHUB_OUTPUT"
+          {
+            echo "build-args<<BUILD_ARGS_EOF"
+            jq -r '(.build.container.buildArgs // {}) | to_entries[] | "\(.key)=\(.value)"' <<<"$PIPELINE"
+            echo "BUILD_ARGS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - id: container
         name: Container
@@ -133,6 +140,8 @@ jobs:
           dockerfile: ${{ fromJSON(inputs.pipeline).build.container.dockerfile }}
           revision: ${{ inputs.ref }}
           cache-scope: ${{ inputs.name }}
+          build-args: ${{ steps.image.outputs.build-args }}
+          attest: ${{ fromJSON(inputs.security).provenance.attest != false }}
           token: ${{ github.token }}
 
   container-scan:
