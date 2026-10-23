@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# Driver gitops-pr: grava o manifesto renderizado do ambiente na branch de
+# Driver gitops-pr: grava os manifestos renderizados do ambiente na branch de
 # estado (lida pelo Argo CD/Flux). O pipeline nao toca no cluster.
+#
+# Todos os artefatos gitops-pr do ambiente entram num UNICO commit/PR: o que se
+# revisa e aprova e "a versao X neste ambiente", nao cada peca separada.
 #
 #   mode=pr     abre PR para a branch de estado; o merge E o deploy (revisao humana)
 #   mode=commit commita direto na branch de estado (so ambientes nao produtivos)
 #
 # Deve rodar dentro de um clone do repositorio de estado.
 # uso: deploy-gitops.sh <deploy|diff|destroy>
-# env: APP ENV_NAME VERSION IMAGE CONFIG STATE_BRANCH MODE STATE_PATH GH_TOKEN TARGET_REPO
+# env: ENV_NAME VERSION IMAGE ARTIFACTS(JSON [{artifact, config}]) STATE_BRANCH MODE
+#      STATE_PATH TARGET_REPO GH_TOKEN [CONFIG_DIR] [SECRET_STORE]
 set -euo pipefail
 
 cmd=${1:-deploy}
-: "${APP:?}" "${ENV_NAME:?}" "${CONFIG:?}" "${STATE_BRANCH:?}" "${MODE:?}" "${TARGET_REPO:?}"
+: "${ENV_NAME:?}" "${ARTIFACTS:?}" "${STATE_BRANCH:?}" "${MODE:?}" "${TARGET_REPO:?}"
 render="$(cd "$(dirname "$0")" && pwd)/render-manifest.sh"
 env_lc=$(tr '[:upper:]' '[:lower:]' <<<"$ENV_NAME")
 dir=${STATE_PATH:-envs/$env_lc}
-file="$dir/$APP.yaml"
+names=$(jq -r '[.[].artifact] | join(", ")' <<<"$ARTIFACTS")
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -35,25 +39,32 @@ else
   git push --quiet origin "$STATE_BRANCH"
 fi
 
-case "$cmd" in
-  diff)
-    tmp=$(mktemp); "$render" > "$tmp"
-    if [ -f "$file" ]; then diff -u "$file" "$tmp" || true; else echo "novo: $file"; cat "$tmp"; fi
-    exit 0 ;;
-  destroy)
-    [ -f "$file" ] && git rm --quiet "$file"
-    message="chore(gitops): remove $APP de $ENV_NAME" ;;
-  deploy)
-    : "${VERSION:?}" "${IMAGE:?}"
-    mkdir -p "$dir"
-    "$render" > "$file"
-    git add "$file"
-    message="deploy($env_lc): $APP $VERSION" ;;
-  *) echo "comando invalido: $cmd" >&2; exit 1 ;;
-esac
+mkdir -p "$dir"
+while IFS= read -r item; do
+  APP=$(jq -r '.artifact' <<<"$item")
+  CONFIG=$(jq -c '.config' <<<"$item")
+  export APP CONFIG
+  file="$dir/$APP.yaml"
+  case "$cmd" in
+    diff)
+      tmp=$(mktemp); "$render" > "$tmp"
+      if [ -f "$file" ]; then diff -u "$file" "$tmp" || true; else echo "novo: $file"; cat "$tmp"; fi ;;
+    destroy)
+      if [ -f "$file" ]; then git rm --quiet "$file"; fi ;;
+    deploy)
+      : "${VERSION:?}" "${IMAGE:?}"
+      "$render" > "$file"
+      git add "$file" ;;
+    *) echo "comando invalido: $cmd" >&2; exit 1 ;;
+  esac
+done < <(jq -c '.[]' <<<"$ARTIFACTS")
+[ "$cmd" = diff ] && exit 0
+
+if [ "$cmd" = destroy ]; then message="chore(gitops): remove $names de $ENV_NAME"
+else message="deploy($env_lc): $VERSION ($names)"; fi
 
 if git diff --cached --quiet; then
-  echo "Nada muda em $file: $ENV_NAME ja esta neste estado."
+  echo "Nada muda em $dir: $ENV_NAME ja esta neste estado."
   exit 0
 fi
 
@@ -64,7 +75,7 @@ if [ "$MODE" = commit ]; then
   exit 0
 fi
 
-work="deploy/$env_lc/$APP-${VERSION:-remove}"
+work="deploy/$env_lc/${VERSION:-remove}"
 git switch --quiet -c "$work"
 git commit --quiet -m "$message" -m "Run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 # branch so do pipeline: re-run do mesmo deploy sobrescreve a tentativa anterior
@@ -72,7 +83,7 @@ git push --quiet --force origin "$work"
 url=$(gh pr list -R "$TARGET_REPO" --head "$work" --base "$STATE_BRANCH" --json url --jq '.[0].url')
 if [ -z "$url" ]; then
   url=$(gh pr create -R "$TARGET_REPO" --base "$STATE_BRANCH" --head "$work" --title "$message" \
-    --body "Mergear este PR **e** o deploy em $ENV_NAME: o agente GitOps aplica o novo estado no cluster.")
+    --body "Mergear este PR **e** o deploy em $ENV_NAME ($names): o agente GitOps aplica o novo estado no cluster.")
 fi
 echo "PR de deploy: $url"
-echo "### Deploy $ENV_NAME por GitOps: $url" >> "$GITHUB_STEP_SUMMARY"
+echo "### Deploy $ENV_NAME por GitOps: $url" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

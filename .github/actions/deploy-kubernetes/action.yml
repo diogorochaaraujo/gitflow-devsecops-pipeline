@@ -1,12 +1,14 @@
 name: deploy-kubernetes
 description: >-
-  Driver kubernetes. Obtem acesso ao cluster do ambiente (kind efemero, AKS por
-  OIDC ou kubeconfig do Environment) e aplica o manifesto da plataforma.
+  Driver kubernetes. Obtem acesso ao cluster do ambiente UMA vez (kind efemero,
+  AKS por OIDC ou kubeconfig do Environment) e aplica, em ordem, o manifesto de
+  cada artefato kubernetes do ambiente.
 
 inputs:
   command:
     default: deploy
-  app:
+  artifacts:
+    description: artefatos do ambiente (JSON [{artifact, driver, config}]); usa os de driver kubernetes
     required: true
   env:
     required: true
@@ -15,8 +17,6 @@ inputs:
   image:
     description: Referencia aplicada no cluster (tag no kind, digest nos demais)
     default: ""
-  config:
-    required: true
   settings:
     description: settings efetivos do ambiente (JSON)
     required: true
@@ -101,14 +101,19 @@ runs:
     - name: Execute Deploy
       shell: bash
       env:
-        APP: ${{ inputs.app }}
+        ARTIFACTS: ${{ inputs.artifacts }}
         ENV_NAME: ${{ inputs.env }}
         VERSION: ${{ inputs.version }}
         IMAGE: ${{ inputs.image }}
-        CONFIG: ${{ inputs.config }}
         NAMESPACE: ${{ steps.target.outputs.namespace }}
         EPHEMERAL: ${{ steps.target.outputs.cluster == 'kind' }}
         CONFIG_DIR: ${{ inputs.config-dir }}
         SECRET_STORE: ${{ steps.target.outputs.secret-store }}
         COMMAND: ${{ inputs.command }}
-      run: '"$GITHUB_ACTION_PATH/../../../scripts/deploy-kubernetes.sh" "$COMMAND"'
+      run: |
+        while IFS= read -r item; do
+          APP=$(jq -r '.artifact' <<<"$item"); CONFIG=$(jq -c '.config' <<<"$item"); export APP CONFIG
+          echo "::group::$APP"
+          "$GITHUB_ACTION_PATH/../../../scripts/deploy-kubernetes.sh" "$COMMAND"
+          echo "::endgroup::"
+        done < <(jq -c '.[] | select(.driver == "kubernetes")' <<<"$ARTIFACTS")

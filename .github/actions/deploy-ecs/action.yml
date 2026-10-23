@@ -1,12 +1,14 @@
 name: deploy-ecs
 description: >-
-  Driver ecs (referencia, nao exercitado pelo laboratorio). Assume o papel de
-  deploy do grupo de contas por OIDC e troca a imagem do servico do ambiente.
+  Driver ecs (referencia, nao exercitado pelo laboratorio). Assume UMA vez o
+  papel de deploy do grupo de contas por OIDC e troca, em ordem, a imagem do
+  servico de cada artefato ecs do ambiente.
 
 inputs:
   command:
     default: deploy
-  app:
+  artifacts:
+    description: artefatos do ambiente (JSON [{artifact, driver, config}]); usa os de driver ecs
     required: true
   env:
     required: true
@@ -14,8 +16,6 @@ inputs:
     default: ""
   image:
     default: ""
-  config:
-    required: true
   settings:
     required: true
   role-arn:
@@ -35,15 +35,19 @@ runs:
     - name: Execute Deploy (ecs)
       shell: bash
       env:
-        APP: ${{ inputs.app }}
+        ARTIFACTS: ${{ inputs.artifacts }}
         ENV_NAME: ${{ inputs.env }}
         VERSION: ${{ inputs.version }}
         IMAGE: ${{ inputs.image }}
-        CONFIG: ${{ inputs.config }}
         SETTINGS: ${{ inputs.settings }}
         COMMAND: ${{ inputs.command }}
       run: |
-        # o cluster vem dos settings do ambiente; o artefato pode sobrescrever
-        CONFIG=$(jq -c --argjson s "$SETTINGS" '{cluster: $s.ecs.cluster} + .' <<<"$CONFIG")
-        export CONFIG
-        "$GITHUB_ACTION_PATH/../../../scripts/deploy-ecs.sh" "$COMMAND"
+        while IFS= read -r item; do
+          APP=$(jq -r '.artifact' <<<"$item")
+          # o cluster vem dos settings do ambiente; o artefato pode sobrescrever
+          CONFIG=$(jq -c --argjson s "$SETTINGS" '{cluster: $s.ecs.cluster} + .config' <<<"$item")
+          export APP CONFIG
+          echo "::group::$APP"
+          "$GITHUB_ACTION_PATH/../../../scripts/deploy-ecs.sh" "$COMMAND"
+          echo "::endgroup::"
+        done < <(jq -c '.[] | select(.driver == "ecs")' <<<"$ARTIFACTS")
