@@ -13,6 +13,6 @@ permissions:
 jobs:
   pending-approvals:
     name: Pending Approvals
-    uses: ./.github/workflows/ops-pending-approvals.yml
+    uses: diogorochaaraujo/gitflow-devsecops-pipeline/.github/workflows/ops-pending-approvals.yml@76e17043cc8c8f8390fd78c7b0565b2014b8604b # v1.0.0
     with:
       older-than-hours: 4

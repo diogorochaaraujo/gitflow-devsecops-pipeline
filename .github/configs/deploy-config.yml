@@ -57,9 +57,12 @@ envs:
       web-api:
         replicas: 2
   PRD:
-    # quem aprova (aplicado pelo bootstrap, nao a cada execucao)
+    # quem aprova (aplicado pelo bootstrap, nao a cada execucao). Quem disparou a
+    # execucao nao aprova o proprio deploy (preventSelfReview, padrao true): no
+    # laboratorio, a segunda conta faz o papel do aprovador.
     reviewers:
       - user: diogorochaaraujo
+      - user: dio4090
     # producao por GitOps: o pipeline abre PR na branch de estado; o merge e o
     # deploy, e quem aplica no cluster e o agente (Argo CD/Flux)
     driver: gitops-pr

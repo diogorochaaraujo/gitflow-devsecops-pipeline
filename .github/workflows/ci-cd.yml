@@ -31,9 +31,8 @@ permissions:
 jobs:
   pipeline:
     name: Pipeline
-    uses: ./.github/workflows/platform.yml
-    # Plataforma em repositorio separado, pinada por SHA (o Dependabot atualiza):
-    # uses: <org>/pipeline-platform/.github/workflows/platform.yml@<sha> # v2.1.0
-    # with:
-    #   platform-repository: <org>/pipeline-platform
-    #   platform-ref: <sha>
+    # plataforma pinada por SHA (docs/10-plataforma.md): a aplicacao escolhe quando
+    # atualizar, o Dependabot propoe a versao nova depois da quarentena, e o
+    # rollback da esteira e voltar este SHA. Numa organizacao, o repositorio da
+    # plataforma e outro (<org>/pipeline-platform); aqui e este mesmo.
+    uses: diogorochaaraujo/gitflow-devsecops-pipeline/.github/workflows/platform.yml@76e17043cc8c8f8390fd78c7b0565b2014b8604b # v1.0.0

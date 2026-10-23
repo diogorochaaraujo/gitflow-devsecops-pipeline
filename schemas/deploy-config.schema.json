@@ -41,6 +41,7 @@
             }
           },
           "waitTimer": { "description": "minutos de espera antes do deploy", "type": "integer", "minimum": 0, "maximum": 43200 },
+          "preventSelfReview": { "description": "quem disparou a execucao nao aprova o proprio deploy (padrao: true; false so com uma pessoa)", "type": "boolean" },
           "artifacts": {
             "type": "object",
             "additionalProperties": { "$ref": "#/$defs/artifact" }
@@ -94,6 +95,7 @@
         },
         "reviewers": true,
         "waitTimer": true,
+        "preventSelfReview": true,
         "artifacts": { "type": "object" }
       }
     },
