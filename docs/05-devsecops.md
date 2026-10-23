@@ -107,3 +107,7 @@ A ferramenta diz *o quê*, não *quem*. Um padrão que funciona é **uma issue v
 por repositório**: checklist de achados reescrito a cada scan, fechado sozinho
 quando zera, com o identificador estável do achado como chave. Em DEV, exige-se
 que tudo esteja mapeado e priorizado. Em HMG e PRD, gate limpo.
+
+---
+
+[← 04 · Config as code](04-config-as-code.md) · [índice](../README.md#comece-por-aqui) · [06 · Laboratório →](06-laboratorio.md)

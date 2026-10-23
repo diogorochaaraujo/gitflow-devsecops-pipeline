@@ -137,7 +137,11 @@ envs:
       - team: minha-org/lideres-tecnicos
       - user: gestor-da-aplicacao
     waitTimer: 15                 # minutos de espera depois da aprovação
+    # preventSelfReview: true     # padrão: quem disparou a execução não aprova
 ```
+
+Quem fez o merge (ou disparou o redeploy) não aprova o próprio deploy: é o
+padrão (`preventSelfReview: true`). Desligue só num laboratório de uma pessoa.
 
 O `scripts/bootstrap-repo.sh` (ou a governança da organização) aplica isso nos
 Environments. A regra de quem aprova fica versionada e muda por PR, mas **não é
@@ -238,3 +242,7 @@ No laboratório, PRD usa `gitops-pr` na própria branch `environments` deste
 repositório: o PR é aberto e mergeado, mas não há agente aplicando, porque o
 cluster `kind` morre com o runner. Para ver a reconciliação de verdade, aponte
 um Argo CD para `envs/prd` dessa branch.
+
+---
+
+[← 03 · Pipelines](03-pipelines.md) · [índice](../README.md#comece-por-aqui) · [05 · DevSecOps →](05-devsecops.md)
