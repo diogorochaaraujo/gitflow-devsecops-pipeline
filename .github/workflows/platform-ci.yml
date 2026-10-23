@@ -55,6 +55,10 @@ jobs:
           persist-credentials: false
       - name: Unit Tests
         run: scripts/tests/run.sh
+      - name: Reusable Permissions
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install --quiet pyyaml==6.0.2
+          "$RUNNER_TEMP/venv/bin/python" scripts/tests/check-permissions.py .
       - name: Validate Config (app e exemplos)
         run: |
           scripts/validate-config.sh .

@@ -153,8 +153,11 @@ jobs:
     name: Stamp
     needs: [resolve, gate]
     if: needs.resolve.outputs.stamp == 'true' && needs.resolve.outputs.publish == 'true'
+    # o GitHub valida as permissoes de TODOS os jobs do reusable, inclusive o
+    # promote que o `if` vai pular: o chamador precisa conceder a uniao
     permissions:
       contents: write
+      packages: write
     uses: ./.github/workflows/stage-release.yml
     with:
       mode: stamp
