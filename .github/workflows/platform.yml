@@ -146,7 +146,9 @@ jobs:
   gate:
     name: Gate
     needs: [resolve, security, build]
-    if: always()
+    # execucao cancelada (ex.: um push mais novo na mesma branch) nao reprova o Gate:
+    # pula, e o check vermelho falso nao aparece no PR
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:

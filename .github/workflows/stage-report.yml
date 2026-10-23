@@ -59,7 +59,8 @@ jobs:
               jobs: ($needs | map_values(.result)),
               approvals: $approvals}' > audit.json
           cat audit.json
-          failed=$(jq -r '[.jobs[]] | any(. == "failure" or . == "cancelled")' audit.json)
+          # cancelamento (concorrencia, cancelamento manual) fica no registro, mas nao e erro a analisar
+          failed=$(jq -r '[.jobs[]] | any(. == "failure")' audit.json)
           echo "failed=$failed" >> "$GITHUB_OUTPUT"
           {
             echo "### $STAGE ${VERSION:+\`$VERSION\`}"
