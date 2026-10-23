@@ -1,4 +1,6 @@
 # regex (grep -E, sem diferenciar maiusculas)	classe	o que fazer
+# A primeira regra que casar vence: as especificas ficam antes das genericas.
+Failed to load .*action\.ya?ml|action manifest|Mapping values are not allowed|workflow is not valid	plataforma	Workflow ou action da plataforma invalido (YAML): erro da esteira, nao do codigo; corrigir na plataforma (Platform CI valida o YAML das actions).
 commits? atras de	processo	Fazer merge da base na branch do PR (git merge origin/main) e enviar de novo.
 exatamente um label	processo	Colocar um unico label Release-Major, Release-Minor ou Release-Patch no PR.
 citar um chamado	processo	Citar o chamado (ex.: ABC-123) no titulo, no corpo ou no nome da branch do PR de release.
@@ -12,7 +14,7 @@ gitleaks|leaks found	seguranca	Remover o segredo do historico (reescrever a bran
 SAST encontrou|semgrep	seguranca	Corrigir o achado ou registrar excecao com prazo; o SARIF do job tem arquivo e linha.
 Total: [1-9]|vulnerabilit	seguranca	Atualizar a dependencia ou a imagem base; excecao com prazo em .trivyignore.yaml.
 Misconfiguration|AVD-	seguranca	Corrigir Dockerfile/manifesto ou registrar excecao com prazo.
-FAILED|AssertionError|Tests run:.*Failures: [1-9]|npm ERR! Test failed|failing	build	Teste quebrado: reproduzir localmente com o mesmo comando de build.test.
+FAILED \(|AssertionError|Tests run:.*Failures: [1-9]|npm ERR! Test failed|[0-9]+ (failing|failed)|Nenhum teste	build	Teste quebrado: reproduzir localmente com o mesmo comando de build.test.
 error TS[0-9]+|COMPILATION ERROR|SyntaxError|cannot find symbol	build	Erro de compilacao: o comando de build da stack falha igual localmente.
 nao estabilizou|ProgressDeadlineExceeded|CrashLoopBackOff|ImagePullBackOff	deploy	A aplicacao nao ficou saudavel: ver logs do pod no job; o rollback ja foi feito.
 attestation|signer-workflow|no matching attestations	deploy	Imagem sem prova de origem valida: so implantar imagem construida pela plataforma.

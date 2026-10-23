@@ -91,7 +91,9 @@ jobs:
           repository: ${{ inputs.platform-repository || github.repository }}
           ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
           path: .platform
-          sparse-checkout: scripts/error-hints.tsv
+          sparse-checkout: |
+            scripts/error-hints.tsv
+            scripts/classify-error.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Classify Failures
@@ -111,11 +113,8 @@ jobs:
               | grep -vE '^Process completed with exit code' | sort -u | head -15 || true)
             log=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" 2>/dev/null || true)
             [ -n "$errors" ] || errors=$(grep -F '##[error]' <<<"$log" | sed -E 's/^[^ ]+ ##\[error\]//' | sort -u | head -15)
-            class="nao classificado"; hint="Ler o log do job; nenhuma regra conhecida casou."
-            while IFS=$'\t' read -r regex c h; do
-              case "$regex" in ''|'#'*) continue ;; esac
-              if grep -qiE "$regex" <<<"$errors"$'\n'"$(tail -n 200 <<<"$log")"; then class=$c; hint=$h; break; fi
-            done < "$HINTS"
+            IFS=$'\t' read -r class hint < <(printf '%s\n%s\n' "$errors" "$(tail -n 200 <<<"$log")" \
+              | .platform/scripts/classify-error.sh "$HINTS")
             {
               echo "### $name"
               echo "- **step:** ${steps:-?}"
