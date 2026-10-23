@@ -103,6 +103,7 @@ scripts/tests/run.sh                                  # 64 testes: versão, rote
 scripts/validate-config.sh .                          # pipeline.yml e deploy-config.yml contra o schema
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/zizmorcore/zizmor:1.30.1 --offline .github/
+docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh scripts/governance/*.sh scripts/tests/*.sh
 ```
 
 ## Autoria, licença e como dar crédito
