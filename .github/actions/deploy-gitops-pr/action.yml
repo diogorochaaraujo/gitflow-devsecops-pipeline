@@ -19,6 +19,9 @@ inputs:
     required: true
   settings:
     required: true
+  config-dir:
+    description: pasta config/ da aplicacao (config/<artefato>/<env>.env)
+    default: ""
   token:
     description: token com contents/pull-requests write no repositorio de estado
     required: true
@@ -42,6 +45,7 @@ runs:
           echo "branch=$(jq -r '.gitops.branch // "environments"' <<<"$SETTINGS")"
           echo "mode=$(jq -r '.gitops.mode // "pr"' <<<"$SETTINGS")"
           echo "path=$(jq -r '.gitops.path // empty' <<<"$SETTINGS")"
+          echo "secret-store=$(jq -r '.kubernetes.secretStore // empty' <<<"$SETTINGS")"
         } >> "$GITHUB_OUTPUT"
 
     # clone separado: o script recria a branch de estado e limpa so esta pasta
@@ -68,6 +72,8 @@ runs:
         STATE_PATH: ${{ steps.target.outputs.path }}
         GH_TOKEN: ${{ inputs.token }}
         COMMAND: ${{ inputs.command }}
+        CONFIG_DIR: ${{ inputs.config-dir }}
+        SECRET_STORE: ${{ steps.target.outputs.secret-store }}
       run: |
         log="$RUNNER_TEMP/gitops-$ENV_NAME-$APP.log"
         "$GITHUB_ACTION_PATH/../../../scripts/deploy-gitops.sh" "$COMMAND" | tee "$log"

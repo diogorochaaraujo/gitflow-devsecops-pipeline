@@ -45,6 +45,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       name: ${{ steps.matrix.outputs.name }}
       dast: ${{ steps.matrix.outputs.dast }}
+      provenance: ${{ steps.matrix.outputs.provenance }}
       signer: ${{ steps.matrix.outputs.signer }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,6 +72,7 @@ jobs:
             echo "matrix=$matrix"
             echo "name=$(yq '.app.name' pipeline.yml)"
             echo "dast=$(yq -o=json -I=0 '.dast' .github/configs/security-config.yml)"
+            echo "provenance=$(yq -o=json -I=0 '.provenance // {"attest": true, "verify": true}' .github/configs/security-config.yml)"
             echo "signer=$PLATFORM_REPO/.github/workflows/stage-build.yml"
           } >> "$GITHUB_OUTPUT"
           jq . <<<"$matrix"
@@ -103,6 +105,12 @@ jobs:
           ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
           path: .platform
           persist-credentials: false
+      # configuracao por ambiente (config/) e migracoes (db/) vivem na aplicacao
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          path: .app
+          persist-credentials: false
 
       - id: image
         name: Image Reference
@@ -114,11 +122,12 @@ jobs:
 
       - id: verify
         name: Verify Artifact
-        if: inputs.command == 'deploy'
+        if: inputs.command == 'deploy' && matrix.driver != 'flyway'
         uses: ./.platform/.github/actions/verify-artifact
         with:
           image: ${{ steps.image.outputs.tag }}
           signer-workflow: ${{ needs.prepare-deploy.outputs.signer }}
+          verify-attestation: ${{ fromJSON(needs.prepare-deploy.outputs.provenance).verify }}
           token: ${{ github.token }}
 
       - name: Deploy (kubernetes)
@@ -133,6 +142,7 @@ jobs:
           image: ${{ (matrix.settings.kubernetes.cluster || 'kind') == 'kind' && steps.image.outputs.tag || steps.verify.outputs.ref }}
           config: ${{ toJSON(matrix.config) }}
           settings: ${{ toJSON(matrix.settings) }}
+          config-dir: ${{ github.workspace }}/.app/config
           registry-token: ${{ github.token }}
           kubeconfig: ${{ secrets.KUBECONFIG }}
           azure-client-id: ${{ vars[format('AZURE_CLIENT_ID_{0}', matrix.account)] }}
@@ -150,7 +160,22 @@ jobs:
           image: ${{ steps.verify.outputs.ref }}
           config: ${{ toJSON(matrix.config) }}
           settings: ${{ toJSON(matrix.settings) }}
+          config-dir: ${{ github.workspace }}/.app/config
           token: ${{ secrets.GITOPS_TOKEN || github.token }}
+
+      - name: Deploy (flyway)
+        if: matrix.driver == 'flyway'
+        uses: ./.platform/.github/actions/deploy-flyway
+        with:
+          command: ${{ inputs.command }}
+          app: ${{ matrix.artifact }}
+          env: ${{ matrix.env }}
+          config: ${{ toJSON(matrix.config) }}
+          settings: ${{ toJSON(matrix.settings) }}
+          migrations-dir: ${{ github.workspace }}/.app/${{ matrix.config.flyway.locations || 'db/migrations' }}
+          db-url: ${{ secrets.DB_URL }}
+          db-user: ${{ secrets.DB_USER }}
+          db-password: ${{ secrets.DB_PASSWORD }}
 
       - name: Deploy (ecs)
         if: matrix.driver == 'ecs'
@@ -169,7 +194,7 @@ jobs:
       # ---- DAST contra o ambiente recem-entregue (so onde o pipeline alcanca o servico) ----
       - name: Execute DAST
         if: >-
-          inputs.command == 'deploy' && matrix.driver == 'kubernetes'
+          inputs.command == 'deploy' && matrix.driver == 'kubernetes' && matrix.config.containerPort
           && fromJSON(needs.prepare-deploy.outputs.dast).enabled
         env:
           GATE: ${{ fromJSON(needs.prepare-deploy.outputs.dast).gate }}

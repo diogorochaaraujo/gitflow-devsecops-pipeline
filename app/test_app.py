@@ -15,6 +15,7 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["app"], "web-api")
         self.assertIn("env", body)
+        self.assertIn("greeting", body)
 
     def test_rota_desconhecida(self):
         status, _ = app.route("/nao-existe")

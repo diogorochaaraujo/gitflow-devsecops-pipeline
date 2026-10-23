@@ -1,0 +1,45 @@
+name: deploy-flyway
+description: >-
+  Driver flyway. Aplica as migracoes do artefato no banco do ambiente, ou as
+  valida num Postgres descartavel quando o ambiente nao tem banco configurado.
+
+inputs:
+  command:
+    default: deploy
+  app:
+    required: true
+  env:
+    required: true
+  config:
+    required: true
+  settings:
+    required: true
+  migrations-dir:
+    description: pasta de migracoes no checkout da aplicacao (caminho absoluto)
+    required: true
+  db-url:
+    description: segredo DB_URL do Environment (jdbc:...)
+    default: ""
+  db-user:
+    default: ""
+  db-password:
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Execute Deploy (flyway)
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        ENV_NAME: ${{ inputs.env }}
+        CONFIG: ${{ inputs.config }}
+        SETTINGS: ${{ inputs.settings }}
+        MIGRATIONS_DIR: ${{ inputs.migrations-dir }}
+        DB_URL: ${{ inputs.db-url }}
+        DB_USER: ${{ inputs.db-user }}
+        DB_PASSWORD: ${{ inputs.db-password }}
+        COMMAND: ${{ inputs.command }}
+        FLYWAY_IMAGE: flyway/flyway:13.10.0-alpine@sha256:c0c2592aa3ab9edf4dde3939d36df3d5f6ee27b8dcc51924ad8bca2470d24fdd
+        POSTGRES_IMAGE: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+      run: '"$GITHUB_ACTION_PATH/../../../scripts/deploy-flyway.sh" "$COMMAND"'

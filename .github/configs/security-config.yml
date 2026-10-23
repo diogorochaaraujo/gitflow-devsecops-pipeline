@@ -22,3 +22,10 @@ container:
 dast:
   enabled: true
   gate: false
+# Prova de origem da imagem (attestation no build, verificacao no deploy).
+# Exige repositorio publico ou GitHub Enterprise Cloud. Em repositorio privado
+# sem Enterprise, desligue: o deploy passa a conferir so o digest e a origem
+# declarada na imagem (mais fraco; ver docs/05-devsecops.md).
+provenance:
+  attest: true
+  verify: true

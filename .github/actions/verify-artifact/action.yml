@@ -3,6 +3,8 @@ description: >-
   Antes de qualquer deploy: resolve o digest da imagem e exige attestation de
   proveniencia assinada pelo workflow de build da plataforma. Imagem construida
   fora da esteira (na maquina de alguem, por outro workflow) nao passa.
+  Sem attestation disponivel (repositorio privado fora do Enterprise), confere
+  so a origem declarada na imagem -- garantia bem mais fraca, e o log avisa.
 
 inputs:
   image:
@@ -11,6 +13,9 @@ inputs:
   signer-workflow:
     description: <owner>/<repo>/.github/workflows/stage-build.yml da plataforma
     required: true
+  verify-attestation:
+    description: "false: so digest + label de origem (security-config.yml -> provenance.verify)"
+    default: "true"
   token:
     required: true
 
@@ -30,16 +35,29 @@ runs:
       env:
         IMAGE: ${{ inputs.image }}
         SIGNER: ${{ inputs.signer-workflow }}
+        ATTESTATION: ${{ inputs.verify-attestation }}
         GH_TOKEN: ${{ inputs.token }}
       run: |
         echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
         digest=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | tr -d '"')
         [ -n "$digest" ] || { echo "::error::Imagem $IMAGE nao encontrada no registry."; exit 1; }
         ref="${IMAGE%:*}@$digest"
-        if ! gh attestation verify "oci://$ref" --repo "$GITHUB_REPOSITORY" --signer-workflow "$SIGNER"; then
-          echo "::error::$IMAGE ($digest) sem attestation valida assinada por $SIGNER."
-          exit 1
+        if [ "$ATTESTATION" = true ]; then
+          if ! gh attestation verify "oci://$ref" --repo "$GITHUB_REPOSITORY" --signer-workflow "$SIGNER"; then
+            echo "::error::$IMAGE ($digest) sem attestation valida assinada por $SIGNER."
+            exit 1
+          fi
+          echo "Proveniencia verificada: $ref"
+        else
+          source=$(docker buildx imagetools inspect "$ref" --format '{{json .Image}}' \
+            | jq -r 'if type == "object" and has("config") then .config.Labels["org.opencontainers.image.source"]
+                     else (to_entries[0].value.config.Labels["org.opencontainers.image.source"]) end // empty')
+          expected="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          if [ "$source" != "$expected" ]; then
+            echo "::error::$IMAGE declara origem '${source:-nenhuma}', esperado $expected."
+            exit 1
+          fi
+          echo "::warning::Attestation desligada (provenance.verify=false): conferidos so digest e origem declarada. Isso nao prova quem construiu a imagem."
         fi
         echo "digest=$digest" >> "$GITHUB_OUTPUT"
         echo "ref=$ref" >> "$GITHUB_OUTPUT"
-        echo "Proveniencia verificada: $ref"

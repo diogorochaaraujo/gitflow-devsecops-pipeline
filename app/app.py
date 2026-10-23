@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 VERSION = os.environ.get("APP_VERSION", "dev")
 ENVIRONMENT = os.environ.get("APP_ENV", "local")
+GREETING = os.environ.get("GREETING", "ola")
 
 SECURITY_HEADERS = {
     "Content-Type": "application/json",
@@ -20,7 +21,7 @@ def route(path):
     if path == "/health":
         return 200, {"status": "ok", "version": VERSION}
     if path == "/":
-        return 200, {"app": "web-api", "version": VERSION, "env": ENVIRONMENT}
+        return 200, {"app": "web-api", "version": VERSION, "env": ENVIRONMENT, "greeting": GREETING}
     return 404, {"error": "not found"}
 
 

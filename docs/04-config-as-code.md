@@ -14,6 +14,7 @@ flow:
   model: gitflow                # gitflow | trunk
   integrationBranch: dsv        # só gitflow
   versioning: label             # label | conventional (trunk exige conventional)
+  changeRef: "[A-Z][A-Z0-9]+-[0-9]+"   # opcional: PR de release precisa citar um chamado
   environments:
     snapshot: [DSV]             # gitflow: push na integração
     candidate: [HMG]            # PR de release (gitflow) ou merge na main (trunk), em ordem
@@ -30,6 +31,8 @@ build:
   container:                    # sempre: a imagem é o artefato entregue
     context: app
     dockerfile: app/Dockerfile
+    buildArgs:                  # opcional; sem segredo (fica gravado na imagem)
+      PYTHON_VERSION: "3.12"
 
 security:
   skipOnSnapshot: []            # sast | sca | iac | container (nunca vale na candidata)
@@ -51,7 +54,7 @@ cobertura de nada.
 
 ```yaml
 defaults:                       # vale para todo ambiente
-  driver: kubernetes            # kubernetes | gitops-pr | ecs
+  driver: kubernetes            # kubernetes | gitops-pr | ecs | flyway
   kubernetes:
     cluster: kind               # kind | aks | kubeconfig
   gitops:
@@ -94,9 +97,101 @@ scripts/render-deploy-matrix.sh .github/configs/deploy-config.yml DSV,HMG,PRD | 
 | `kubernetes` + `kubeconfig` | `namespace` | segredo `KUBECONFIG` **do Environment** |
 | `gitops-pr` | `repository`, `branch`, `mode`, `path` | `github.token` (mesmo repo) ou segredo `GITOPS_TOKEN` do Environment |
 | `ecs` | `ecs.cluster` | vars `AWS_REGION`, `AWS_ROLE_ARN_<GRUPO>` (OIDC) |
+| `flyway` | `flyway.database`, `locations`, `schema` | segredos `DB_URL`, `DB_USER`, `DB_PASSWORD` do Environment |
 
 Segredos ficam **no Environment**, nunca no repositório: o job de deploy só os
 recebe depois da aprovação daquele ambiente.
+
+## Recursos do `deploy-config.yml`
+
+### Driver por artefato e ordem dentro do ambiente
+
+Um repositório pode entregar artefatos de tecnologias diferentes: a API no
+Kubernetes e as migrações do banco pelo Flyway, por exemplo. O driver de cada
+item vem do lugar mais específico:
+
+```
+artifacts.<a>.driver (com override em envs.<ENV>.artifacts.<a>)  >  envs.<ENV>.driver  >  defaults.driver
+```
+
+Dentro de cada ambiente, os artefatos rodam em série, por `order` crescente
+(padrão 100). Migração com `order: 10` roda **antes** da aplicação que depende
+dela, em todos os ambientes.
+
+### Quem aprova, como código
+
+```yaml
+envs:
+  HMG:
+    reviewers:
+      - team: minha-org/lideres-tecnicos
+  PRD:
+    reviewers:
+      - team: minha-org/lideres-tecnicos
+      - user: gestor-da-aplicacao
+    waitTimer: 15                 # minutos de espera depois da aprovação
+```
+
+O `scripts/bootstrap-repo.sh` (ou a governança da organização) aplica isso nos
+Environments. A regra de quem aprova fica versionada e muda por PR, mas **não é
+reaplicada a cada execução**: reconfigurar o repositório dentro do pipeline gera
+latência e falhas que nada têm a ver com o código.
+
+### Configuração e segredos de runtime
+
+| O quê | Onde | Vira | Quem vê o valor |
+|---|---|---|---|
+| configuração (`LOG_LEVEL`, URLs públicas, flags) | `config/<artefato>/<env>.env`, `CHAVE=VALOR` | ConfigMap + `envFrom`, com checksum no pod (mudou a configuração, os pods reiniciam) | todos com acesso ao repositório |
+| segredo (senha, token, chave) | **nome** em `artifacts.<a>.secrets: [BANCO, API_KEY]`, **valor** no cofre em `<artefato>/<env>/<NOME>` | ExternalSecret (External Secrets Operator) + `envFrom` | só o cluster |
+
+- o pipeline **nunca toca o valor do segredo**: ele só declara o nome. Isso vale
+  igual para os drivers `kubernetes` e `gitops-pr`, e por isso o repositório de
+  estado não contém segredo;
+- uma chave com cara de segredo (`PASS`, `SECRET`, `TOKEN`, `PRIVATE`,
+  `CREDENTIAL`) num arquivo `.env` de configuração **faz o deploy falhar**;
+- `secrets` exige `kubernetes.secretStore` (o `ClusterSecretStore` do cluster) no
+  ambiente. Sem ele, o deploy recusa em vez de subir a aplicação sem segredo.
+
+### Workers e tempo de rollout
+
+```yaml
+artifacts:
+  web-api:
+    containerPort: 8080
+  web-worker:                     # sem containerPort: sem Service, sem probe, sem smoke test
+    args: ["python", "worker.py"] # mesma imagem, outro processo
+    rolloutTimeout: 300           # segundos (padrão 180)
+```
+
+### Banco de dados: driver `flyway`
+
+```yaml
+artifacts:
+  web-api-db:
+    driver: flyway
+    order: 10
+    flyway:
+      database: postgresql
+      locations: db/migrations
+      schema: public
+```
+
+- **Ambiente real**: segredos `DB_URL`, `DB_USER` e `DB_PASSWORD` no Environment.
+  O job roda `flyway migrate` e `flyway info`;
+- **`flyway.ephemeral: true`** (laboratório, ou num ambiente de verificação):
+  sem `DB_URL`, sobe um Postgres descartável e prova que as migrações aplicam do
+  zero;
+- `destroy` é recusado: apagar dados é operação manual, fora da esteira;
+- **migração publicada nunca muda**: o *Resolve* compara com a última release e
+  recusa alteração, renomeação ou deleção de arquivo nas pastas de migração. Uma
+  correção é sempre uma migração nova. Assim nenhum ambiente diverge e o Flyway
+  nunca encontra checksum trocado.
+
+### Contingência
+
+Um ambiente de contingência entra depois de produção na lista de `release`
+(`release: [PRD, CTG]`). Os deploys são em série: CTG só recebe a versão depois
+que PRD terminou bem.
 
 ## GitOps
 

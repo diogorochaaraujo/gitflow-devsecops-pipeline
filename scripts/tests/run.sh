@@ -57,20 +57,54 @@ check "trunk PR merged"          "none false false - false - false true"        
 
 # ---------- render-deploy-matrix.sh ----------
 m=$("$s/render-deploy-matrix.sh" "$root/.github/configs/deploy-config.yml" "DSV, HMG,PRD")
-check "matriz: ordem dos ambientes" "DSV HMG PRD" "$(jq -r '[.include[].env] | join(" ")' <<<"$m")"
-check "matriz: driver por ambiente" "kubernetes kubernetes gitops-pr" "$(jq -r '[.include[].driver] | join(" ")' <<<"$m")"
-check "matriz: override do artefato" "1 2 2 512" "$(jq -r '[.include[].config.replicas] + [.include[2].config.cpu] | join(" ")' <<<"$m")"
-check "matriz: grupo de contas" "NPRD NPRD PRD" "$(jq -r '[.include[].account] | join(" ")' <<<"$m")"
-check "matriz: settings herdam defaults" "environments" "$(jq -r '.include[2].settings.gitops.branch' <<<"$m")"
-check "matriz: sem artifacts nos settings" "null" "$(jq -c '.include[2].settings.artifacts' <<<"$m")"
+check "matriz: banco antes da app em cada ambiente" "DSV:web-api-db DSV:web-api HMG:web-api-db HMG:web-api PRD:web-api-db PRD:web-api" \
+  "$(jq -r '[.include[] | "\(.env):\(.artifact)"] | join(" ")' <<<"$m")"
+check "matriz: driver do artefato vence o do ambiente" "flyway kubernetes flyway kubernetes flyway gitops-pr" "$(jq -r '[.include[].driver] | join(" ")' <<<"$m")"
+check "matriz: ordem crescente" "0 1 1000 1001 2000 2001" "$(jq -r '[.include[].order] | join(" ")' <<<"$m")"
+check "matriz: override do artefato no ambiente" "1 2 2 512" "$(jq -r '[.include[] | select(.artifact=="web-api") | .config.replicas] + [.include[5].config.cpu] | join(" ")' <<<"$m")"
+check "matriz: grupo de contas" "NPRD PRD" "$(jq -r '[.include[1].account, .include[5].account] | join(" ")' <<<"$m")"
+check "matriz: settings herdam defaults" "environments true" "$(jq -r '.include[5].settings | "\(.gitops.branch) \(.flyway.ephemeral)"' <<<"$m")"
+check "matriz: reviewers/artifacts fora dos settings" "null null" "$(jq -r '.include[5].settings | "\(.reviewers) \(.artifacts)"' <<<"$m")"
 check "matriz vazia" '{"include":[]}' "$("$s/render-deploy-matrix.sh" "$root/.github/configs/deploy-config.yml" "")"
 
 # ---------- render-manifest.sh ----------
-man=$(APP=web-api ENV_NAME=HMG VERSION=1.5.0-12 IMAGE='ghcr.io/o/web-api@sha256:abc' \
-      CONFIG='{"containerPort":8080,"replicas":2,"cpu":256,"memory":512}' "$s/render-manifest.sh")
+mf() { "$s/render-manifest.sh"; }
+man=$(APP=web-api ENV_NAME=HMG VERSION=1.5.0-12 IMAGE='ghcr.io/o/web-api@sha256:abc' CONFIG_DIR="$root/config" \
+      CONFIG='{"containerPort":8080,"replicas":2,"cpu":256,"memory":512}' mf)
 check "manifesto: imagem por digest" "ghcr.io/o/web-api@sha256:abc" "$(yq 'select(.kind=="Deployment") | .spec.template.spec.containers[0].image' <<<"$man")"
-check "manifesto: namespace do ambiente" "hmg hmg" "$(yq '.metadata.namespace' <<<"$man" | grep -v '^---' | tr '\n' ' ' | sed 's/ $//')"
-check "manifesto: replicas" "2" "$(yq 'select(.kind=="Deployment") | .spec.replicas' <<<"$man")"
+check "manifesto: documentos" "ConfigMap Deployment Service" "$(yq '.kind' <<<"$man" | grep -v '^---' | tr '\n' ' ' | sed 's/ $//')"
+check "manifesto: configmap do ambiente" "ola do ambiente HMG" "$(yq 'select(.kind=="ConfigMap") | .data.GREETING' <<<"$man")"
+check "manifesto: envFrom do configmap" "web-api-config" "$(yq 'select(.kind=="Deployment") | .spec.template.spec.containers[0].envFrom[0].configMapRef.name' <<<"$man")"
+check "manifesto: checksum forca rollout" "16" "$(yq 'select(.kind=="Deployment") | .spec.template.metadata.annotations."checksum/config"' <<<"$man" | tr -d '\n' | wc -c | tr -d ' ')"
+wk=$(APP=web-worker ENV_NAME=DSV VERSION=1 IMAGE=img CONFIG='{"args":["python","worker.py"]}' mf)
+check "worker: sem Service" "Deployment" "$(yq '.kind' <<<"$wk" | grep -v '^---' | tr '\n' ' ' | sed 's/ $//')"
+check "worker: args e sem probe" '["python","worker.py"] null' "$(yq -o=json -I=0 'select(.kind=="Deployment") | [.spec.template.spec.containers[0].args, .spec.template.spec.containers[0].readinessProbe]' <<<"$wk" | jq -r '"\(.[0]|tojson) \(.[1])"')"
+sec=$(APP=web-api ENV_NAME=PRD VERSION=1 IMAGE=img CONFIG='{"containerPort":8080,"secrets":["BANCO"]}' SECRET_STORE=cofre mf)
+check "secrets: ExternalSecret com chave por convencao" "web-api/prd/BANCO cofre" "$(yq 'select(.kind=="ExternalSecret") | .spec.data[0].remoteRef.key + " " + .spec.secretStoreRef.name' <<<"$sec")"
+APP=web-api ENV_NAME=PRD VERSION=1 IMAGE=img CONFIG='{"secrets":["BANCO"]}' mf >/dev/null 2>&1; check "secrets sem secretStore recusado" "1" "$?"
+mkdir -p "$work/cfg/x"; echo "API_TOKEN=abc" > "$work/cfg/x/dsv.env"
+APP=x ENV_NAME=DSV VERSION=1 IMAGE=img CONFIG='{}' CONFIG_DIR="$work/cfg" mf >/dev/null 2>&1; check "segredo em arquivo de config recusado" "1" "$?"
+
+# ---------- check-migrations.sh ----------
+mig=$(mktemp -d); ( cd "$mig" && git init -q -b main && git config user.email t@t && git config user.name t
+  mkdir -p db/migrations .github/configs
+  printf 'defaults: {driver: kubernetes}\nartifacts:\n  app-db: {driver: flyway, flyway: {locations: db/migrations}}\n' > .github/configs/deploy-config.yml
+  echo "CREATE TABLE a (id int);" > db/migrations/V1__a.sql; git add -A; git commit -qm v1; git tag 1.0.0 )
+( cd "$mig" && echo "CREATE TABLE b (id int);" > db/migrations/V2__b.sql && git add -A && git commit -qm v2 )
+( cd "$mig" && "$s/check-migrations.sh" >/dev/null 2>&1 ); check "migracao nova aceita" "0" "$?"
+( cd "$mig" && echo "-- editada" >> db/migrations/V1__a.sql && git commit -qam edita )
+( cd "$mig" && "$s/check-migrations.sh" >/dev/null 2>&1 ); check "migracao publicada alterada recusada" "1" "$?"
+rm -rf "$mig"
+
+# ---------- validate-pr.sh: chamado ----------
+pr=$(mktemp -d); ( cd "$pr" && git init -q --bare remote.git && git init -q -b main w && cd w && git config user.email t@t && git config user.name t \
+  && git commit -q --allow-empty -m i && git remote add origin ../remote.git && git push -q origin main )
+vp() { ( cd "$pr/w" && BASE_REF=main HEAD_SHA=$(git rev-parse HEAD) LABELS='["Release-Minor"]' CHANGE_REF='[A-Z][A-Z0-9]+-[0-9]+' \
+  PR_TITLE=$1 PR_BODY=$2 HEAD_REF=$3 "$s/validate-pr.sh" >/dev/null 2>&1 ); echo $?; }
+check "chamado no titulo" "0" "$(vp "release LAB-12" "" dsv)"
+check "chamado na branch" "0" "$(vp "release" "" "OPS-7-ajuste")"
+check "sem chamado recusado" "1" "$(vp "release" "sem referencia" dsv)"
+rm -rf "$pr"
 
 echo
 echo "testes: $pass ok, $fail falharam"

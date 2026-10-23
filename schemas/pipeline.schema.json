@@ -4,101 +4,271 @@
   "title": "pipeline.yml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["app", "flow", "build"],
+  "required": [
+    "app",
+    "flow",
+    "build"
+  ],
   "properties": {
     "app": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$" }
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$"
+        }
       }
     },
     "flow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model", "versioning", "environments"],
+      "required": [
+        "model",
+        "versioning",
+        "environments"
+      ],
       "properties": {
-        "model": { "enum": ["gitflow", "trunk"] },
-        "integrationBranch": { "type": "string", "minLength": 1 },
-        "versioning": { "enum": ["label", "conventional"] },
+        "model": {
+          "enum": [
+            "gitflow",
+            "trunk"
+          ]
+        },
+        "integrationBranch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "versioning": {
+          "enum": [
+            "label",
+            "conventional"
+          ]
+        },
         "environments": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "snapshot": { "$ref": "#/$defs/envList" },
-            "candidate": { "$ref": "#/$defs/envList" },
-            "release": { "$ref": "#/$defs/envList" }
+            "snapshot": {
+              "$ref": "#/$defs/envList"
+            },
+            "candidate": {
+              "$ref": "#/$defs/envList"
+            },
+            "release": {
+              "$ref": "#/$defs/envList"
+            }
           }
+        },
+        "changeRef": {
+          "description": "regex de chamado exigido no PR de release (ex.: \"[A-Z][A-Z0-9]+-[0-9]+\")",
+          "type": "string",
+          "minLength": 3
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "model": { "const": "gitflow" } } },
-          "then": { "required": ["integrationBranch"] }
+          "if": {
+            "properties": {
+              "model": {
+                "const": "gitflow"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "integrationBranch"
+            ]
+          }
         },
         {
           "$comment": "no trunk o push na main nao tem PR, logo nao tem label",
-          "if": { "properties": { "model": { "const": "trunk" } } },
-          "then": { "properties": { "versioning": { "const": "conventional" } } }
+          "if": {
+            "properties": {
+              "model": {
+                "const": "trunk"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "versioning": {
+                "const": "conventional"
+              }
+            }
+          }
         }
       ]
     },
     "build": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["stack", "container"],
+      "required": [
+        "stack",
+        "container"
+      ],
       "properties": {
-        "stack": { "enum": ["node", "python", "java", "container"] },
+        "stack": {
+          "enum": [
+            "node",
+            "python",
+            "java",
+            "container"
+          ]
+        },
         "node": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "version": { "type": "string" },
-            "workingDirectory": { "type": "string" },
-            "packageManager": { "enum": ["npm", "pnpm", "yarn"] },
-            "lint": { "type": "string" },
-            "test": { "type": "string" },
-            "build": { "type": "string" }
+            "version": {
+              "type": "string"
+            },
+            "workingDirectory": {
+              "type": "string"
+            },
+            "packageManager": {
+              "enum": [
+                "npm",
+                "pnpm",
+                "yarn"
+              ]
+            },
+            "lint": {
+              "type": "string"
+            },
+            "test": {
+              "type": "string"
+            },
+            "build": {
+              "type": "string"
+            }
           }
         },
         "python": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "version": { "type": "string" },
-            "workingDirectory": { "type": "string" },
-            "install": { "type": "string" },
-            "lint": { "type": "string" },
-            "test": { "type": "string" }
+            "version": {
+              "type": "string"
+            },
+            "workingDirectory": {
+              "type": "string"
+            },
+            "install": {
+              "type": "string"
+            },
+            "lint": {
+              "type": "string"
+            },
+            "test": {
+              "type": "string"
+            }
           }
         },
         "java": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "version": { "type": "string" },
-            "distribution": { "type": "string" },
-            "tool": { "enum": ["maven", "gradle"] },
-            "workingDirectory": { "type": "string" },
-            "test": { "type": "string" }
+            "version": {
+              "type": "string"
+            },
+            "distribution": {
+              "type": "string"
+            },
+            "tool": {
+              "enum": [
+                "maven",
+                "gradle"
+              ]
+            },
+            "workingDirectory": {
+              "type": "string"
+            },
+            "test": {
+              "type": "string"
+            }
           }
         },
         "container": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["context", "dockerfile"],
+          "required": [
+            "context",
+            "dockerfile"
+          ],
           "properties": {
-            "context": { "type": "string" },
-            "dockerfile": { "type": "string" },
-            "test": { "type": "string" }
+            "context": {
+              "type": "string"
+            },
+            "dockerfile": {
+              "type": "string"
+            },
+            "test": {
+              "type": "string"
+            },
+            "buildArgs": {
+              "description": "argumentos do docker build (sem segredo: ficam na imagem)",
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            }
           }
         }
       },
       "allOf": [
-        { "if": { "properties": { "stack": { "const": "node" } } }, "then": { "required": ["node"] } },
-        { "if": { "properties": { "stack": { "const": "python" } } }, "then": { "required": ["python"] } },
-        { "if": { "properties": { "stack": { "const": "java" } } }, "then": { "required": ["java"] } }
+        {
+          "if": {
+            "properties": {
+              "stack": {
+                "const": "node"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "node"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stack": {
+                "const": "python"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "python"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stack": {
+                "const": "java"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "java"
+            ]
+          }
+        }
       ]
     },
     "security": {
@@ -108,7 +278,14 @@
         "skipOnSnapshot": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["sast", "sca", "iac", "container"] }
+          "items": {
+            "enum": [
+              "sast",
+              "sca",
+              "iac",
+              "container"
+            ]
+          }
         }
       }
     }
@@ -117,7 +294,10 @@
     "envList": {
       "type": "array",
       "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9]{1,9}$" }
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9]{1,9}$"
+      }
     }
   }
 }
