@@ -114,9 +114,16 @@ item vem do lugar mais específico:
 artifacts.<a>.driver (com override em envs.<ENV>.artifacts.<a>)  >  envs.<ENV>.driver  >  defaults.driver
 ```
 
-Dentro de cada ambiente, os artefatos rodam em série, por `order` crescente
-(padrão 100). Migração com `order: 10` roda **antes** da aplicação que depende
-dela, em todos os ambientes.
+Cada ambiente é **um job** (uma aprovação) que entrega os seus artefatos em
+ordem fixa por driver: **`flyway` primeiro** (o banco sempre antes das
+aplicações), depois `ecs`, `kubernetes` e `gitops-pr`. Dentro de um driver,
+vale `order` crescente (padrão 100).
+
+Com `gitops-pr`, a migração roda quando o pipeline passa, e a aplicação entra
+quando o PR de estado é mergeado. Ou seja, o esquema chega **antes** do código.
+Por isso as migrações precisam ser compatíveis com a versão anterior da
+aplicação (*expand/contract*: adicionar primeiro, remover só numa release
+seguinte).
 
 ### Quem aprova, como código
 

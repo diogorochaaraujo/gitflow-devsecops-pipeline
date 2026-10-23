@@ -32,17 +32,21 @@ flowchart LR
 
 ## O deploy por dentro (`stage-deploy`)
 
-1. **Prepare Deploy** monta a matriz (ambiente × artefato), na ordem pedida, com
-   `defaults` → `envs.<ENV>` e `artifacts.<a>` → `envs.<ENV>.artifacts.<a>`.
-2. **Um job por item**, em série, com `environment: <ENV>` (aprovação, segredos
-   e histórico do ambiente) e `concurrency` por ambiente (dois deploys no mesmo
-   ambiente nunca se cruzam).
+1. **Prepare Deploy** resolve o commit de origem da versão e monta a matriz:
+   **um item por ambiente**, na ordem pedida, com os artefatos daquele ambiente
+   (`defaults` → `envs.<ENV>` e `artifacts.<a>` → `envs.<ENV>.artifacts.<a>`).
+2. **Um job por ambiente**, em série, com `environment: <ENV>` (aprovação,
+   segredos e histórico do ambiente) e `concurrency` por ambiente (dois deploys
+   no mesmo ambiente nunca se cruzam). **Uma aprovação por ambiente**, não importa
+   quantos artefatos ele tenha: o aprovador aprova "a versão X em PRD".
 3. Em cada job:
    - checkout da aplicação, para ler `config/` e as migrações;
-   - **Verify Artifact** (exceto no `flyway`): resolve o digest e roda `gh attestation verify
+   - **Verify Artifact**, uma vez: resolve o digest e roda `gh attestation verify
      --signer-workflow <plataforma>/stage-build.yml`. Imagem construída fora da
      plataforma **não é implantada**;
-   - **driver** do ambiente:
+   - os **drivers**, em ordem fixa: `flyway` → `ecs` → `kubernetes` → `gitops-pr`.
+     Dentro de cada driver, os artefatos seguem `order`. Cada driver faz o setup uma
+     vez (cluster, login na nuvem, clone do estado) e entrega todos os seus artefatos:
 
 | Driver | O que faz | Onde o pipeline toca |
 |---|---|---|
