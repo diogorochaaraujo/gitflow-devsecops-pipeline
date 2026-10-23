@@ -1,0 +1,20 @@
+defaults:
+  driver: ecs
+  ecs:
+    cluster: apps-nprd
+
+# vars por grupo: AWS_ROLE_ARN_NPRD, AWS_ROLE_ARN_PRD e AWS_REGION
+accounts:
+  DSV: NPRD
+  HMG: NPRD
+  PRD: PRD
+
+artifacts:
+  motor-calculo:
+    containerPort: 8000
+    healthPath: /health
+
+envs:
+  PRD:
+    ecs:
+      cluster: apps-prd

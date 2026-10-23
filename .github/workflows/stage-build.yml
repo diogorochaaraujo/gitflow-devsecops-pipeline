@@ -1,0 +1,165 @@
+# Plataforma / estagio: modulo da stack (deps, lint, testes) -> imagem com
+# SBOM, proveniencia e attestation -> scan da imagem publicada.
+#
+# Este arquivo e o "signer workflow" das attestations: o deploy so aceita
+# imagem cuja prova de origem foi assinada por ele (SLSA Build L3 quando a
+# plataforma vive num repositorio separado do da aplicacao).
+name: Stage Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      name:
+        type: string
+        required: true
+      pipeline:
+        description: pipeline.yml em JSON
+        type: string
+        required: true
+      security:
+        description: security-config.yml em JSON
+        type: string
+        required: true
+      ref:
+        type: string
+        required: true
+      publish:
+        description: false = so testa (bots sem permissao de escrita)
+        type: boolean
+        default: true
+      skip-container-scan:
+        type: boolean
+        default: false
+      platform-repository:
+        type: string
+        default: ""
+      platform-ref:
+        type: string
+        default: ""
+    outputs:
+      image:
+        value: ${{ jobs.build.outputs.image }}
+      digest:
+        value: ${{ jobs.build.outputs.digest }}
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+
+jobs:
+  build:
+    name: Build/Upload ${{ inputs.version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image: ${{ steps.container.outputs.ref }}
+      digest: ${{ steps.container.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+          persist-credentials: false
+
+      # ---- modulo da stack: um por linguagem, escolhido por build.stack ----
+      - name: Stack (node)
+        if: fromJSON(inputs.pipeline).build.stack == 'node'
+        uses: ./.platform/.github/actions/build-node
+        with:
+          version: ${{ fromJSON(inputs.pipeline).build.node.version || '22' }}
+          working-directory: ${{ fromJSON(inputs.pipeline).build.node.workingDirectory || '.' }}
+          package-manager: ${{ fromJSON(inputs.pipeline).build.node.packageManager || 'npm' }}
+          lint: ${{ fromJSON(inputs.pipeline).build.node.lint || '' }}
+          test: ${{ fromJSON(inputs.pipeline).build.node.test || '' }}
+          build: ${{ fromJSON(inputs.pipeline).build.node.build || '' }}
+
+      - name: Stack (python)
+        if: fromJSON(inputs.pipeline).build.stack == 'python'
+        uses: ./.platform/.github/actions/build-python
+        with:
+          version: ${{ fromJSON(inputs.pipeline).build.python.version || '3.12' }}
+          working-directory: ${{ fromJSON(inputs.pipeline).build.python.workingDirectory || '.' }}
+          install: ${{ fromJSON(inputs.pipeline).build.python.install || '' }}
+          lint: ${{ fromJSON(inputs.pipeline).build.python.lint || '' }}
+          test: ${{ fromJSON(inputs.pipeline).build.python.test || '' }}
+
+      - name: Stack (java)
+        if: fromJSON(inputs.pipeline).build.stack == 'java'
+        uses: ./.platform/.github/actions/build-java
+        with:
+          version: ${{ fromJSON(inputs.pipeline).build.java.version || '21' }}
+          distribution: ${{ fromJSON(inputs.pipeline).build.java.distribution || 'temurin' }}
+          tool: ${{ fromJSON(inputs.pipeline).build.java.tool || 'maven' }}
+          working-directory: ${{ fromJSON(inputs.pipeline).build.java.workingDirectory || '.' }}
+          test: ${{ fromJSON(inputs.pipeline).build.java.test || '' }}
+
+      - name: Stack (container)
+        if: fromJSON(inputs.pipeline).build.stack == 'container' && fromJSON(inputs.pipeline).build.container.test
+        env:
+          CMD: ${{ fromJSON(inputs.pipeline).build.container.test }}
+        run: bash -c "$CMD"
+
+      # ---- imagem: comum a toda stack ----
+      - id: image
+        name: Image Name
+        if: inputs.publish
+        env:
+          NAME: ${{ inputs.name }}
+        run: echo "repo=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$NAME" >> "$GITHUB_OUTPUT"
+
+      - id: container
+        name: Container
+        if: inputs.publish
+        uses: ./.platform/.github/actions/build-container
+        with:
+          image: ${{ steps.image.outputs.repo }}
+          version: ${{ inputs.version }}
+          context: ${{ fromJSON(inputs.pipeline).build.container.context }}
+          dockerfile: ${{ fromJSON(inputs.pipeline).build.container.dockerfile }}
+          revision: ${{ inputs.ref }}
+          cache-scope: ${{ inputs.name }}
+          token: ${{ github.token }}
+
+  container-scan:
+    name: Container Security
+    needs: build
+    if: inputs.publish && fromJSON(inputs.security).container.enabled && !inputs.skip-container-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          sparse-checkout: .trivyignore.yaml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Trivy (imagem publicada, por digest)
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          SEVERITY: ${{ fromJSON(inputs.security).container.failOn }}
+          EXIT_CODE: ${{ fromJSON(inputs.security).container.gate && '1' || '0' }}
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ github.token }}
+        run: |
+          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            image --ignore-unfixed --severity "$SEVERITY" --ignorefile .trivyignore.yaml \
+            --exit-code "$EXIT_CODE" "${IMAGE%:*}@$DIGEST"

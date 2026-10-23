@@ -1,6 +1,6 @@
-# Camada da plataforma: analises estaticas do codigo-fonte, em paralelo ao build.
-# Cada scanner liga/desliga e quebra/registra conforme .github/configs/security-config.yml.
-name: Pipeline Security
+# Plataforma / estagio: analises estaticas do codigo-fonte, em paralelo ao build.
+# Cada scanner liga/desliga e quebra/registra por .github/configs/security-config.yml.
+name: Stage Security
 
 on:
   workflow_call:
@@ -10,31 +10,33 @@ on:
         type: string
         required: true
       ref:
-        description: Commit analisado
         type: string
         required: true
-      skip-sast:
-        type: boolean
-        default: false
-      skip-sca:
-        type: boolean
-        default: false
+      skip:
+        description: scanners pulados nesta execucao (JSON array; so snapshot/verify)
+        type: string
+        default: "[]"
+
+permissions:
+  contents: read
 
 env:
-  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.21.2
-  SEMGREP_IMAGE: semgrep/semgrep:1.95.0
-  TRIVY_IMAGE: aquasec/trivy:0.57.1
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  SEMGREP_IMAGE: semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3
+  TRIVY_IMAGE: aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
 
 jobs:
   secrets:
     name: Secrets
     if: fromJSON(inputs.security).secrets.enabled
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Gitleaks (historico completo)
         env:
           EXIT_CODE: ${{ fromJSON(inputs.security).secrets.gate && '1' || '0' }}
@@ -44,12 +46,14 @@ jobs:
 
   sast:
     name: SAST
-    if: fromJSON(inputs.security).sast.enabled && !inputs.skip-sast
+    if: fromJSON(inputs.security).sast.enabled && !contains(fromJSON(inputs.skip), 'sast')
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Semgrep
         env:
           GATE: ${{ fromJSON(inputs.security).sast.gate }}
@@ -61,10 +65,10 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] && [ "$GATE" = true ]; then
-            echo "::error::SAST encontrou achados de severidade ERROR."
+            echo "::error::SAST encontrou achados de severidade ERROR (detalhe no artefato sast)."
             exit "$rc"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: sast-${{ github.run_attempt }}
@@ -73,12 +77,14 @@ jobs:
 
   sca:
     name: SCA
-    if: fromJSON(inputs.security).sca.enabled && !inputs.skip-sca
+    if: fromJSON(inputs.security).sca.enabled && !contains(fromJSON(inputs.skip), 'sca')
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Trivy (dependencias)
         env:
           SEVERITY: ${{ fromJSON(inputs.security).sca.failOn }}
@@ -90,12 +96,14 @@ jobs:
 
   iac:
     name: IaC
-    if: fromJSON(inputs.security).iac.enabled && !inputs.skip-sca
+    if: fromJSON(inputs.security).iac.enabled && !contains(fromJSON(inputs.skip), 'iac')
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: Trivy (Dockerfile, manifestos)
         env:
           SEVERITY: ${{ fromJSON(inputs.security).iac.failOn }}

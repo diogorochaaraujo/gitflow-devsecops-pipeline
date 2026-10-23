@@ -1,0 +1,25 @@
+# Cenario: API Spring Boot, gitflow com label de release, deploy direto em AKS
+# por identidade federada (sem segredo guardado).
+app:
+  name: api-contratos
+
+flow:
+  model: gitflow
+  integrationBranch: develop
+  versioning: label
+  environments:
+    snapshot: [DSV]
+    candidate: [TST, HMG]
+    release: [PRD]
+
+build:
+  stack: java
+  java:
+    version: "21"
+    tool: maven
+  container:
+    context: .
+    dockerfile: Dockerfile
+
+security:
+  skipOnSnapshot: [iac]

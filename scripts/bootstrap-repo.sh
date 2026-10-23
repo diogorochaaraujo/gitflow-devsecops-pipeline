@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Prepara um repositorio para a esteira, uma vez: branch de integracao, labels
-# de release, ambientes (PRD com aprovacao), regras de branch e de tag e a
-# permissao do GITHUB_TOKEN para abrir o PR de back-merge.
+# Prepara UM repositorio para a esteira (conta pessoal ou org sem regras de
+# organizacao): branch de integracao, labels, Environments, regras de branch e
+# de tag e permissao do GITHUB_TOKEN para abrir PR. Idempotente: cria ou atualiza.
 #
-# No modelo de referencia isso e sincronizado a cada execucao do pipeline;
-# aqui e um passo de bootstrap idempotente (docs/07-melhorias.md, item 2).
+# Numa organizacao, prefira as regras de org (scripts/governance/apply-org.sh):
+# valem para todos os repositorios e o time da aplicacao nao consegue alterar.
 #
 # uso: scripts/bootstrap-repo.sh <owner/repo> [revisor-de-producao]
 # requer: gh autenticado com permissao de admin no repositorio
@@ -16,6 +16,18 @@ integration=${INTEGRATION_BRANCH:-dsv}
 
 step() { printf '\n== %s\n' "$*"; }
 warn() { printf 'AVISO: %s\n' "$*" >&2; }
+
+# cria ou atualiza um ruleset do repositorio pelo nome
+upsert_ruleset() {
+  local body=$1 name id
+  name=$(jq -r .name <<<"$body")
+  id=$(gh api "repos/$repo/rulesets" --jq ".[] | select(.name == \"$name\") | .id" 2>/dev/null || true)
+  if [ -n "$id" ]; then
+    gh api -X PUT "repos/$repo/rulesets/$id" --input - --silent <<<"$body" && echo "$name: atualizado"
+  else
+    gh api -X POST "repos/$repo/rulesets" --input - --silent <<<"$body" && echo "$name: criado"
+  fi || warn "$name nao aplicado (plano nao permite neste tipo de repositorio?)"
+}
 
 step "branch de integracao: $integration"
 if ! gh api "repos/$repo/branches/$integration" --silent 2>/dev/null; then
@@ -30,6 +42,7 @@ step "labels de release"
 gh label create Release-Major -R "$repo" --color 0E8A16 --description "Mudanca incompativel" --force
 gh label create Release-Minor -R "$repo" --color FBCA04 --description "Funcionalidade compativel" --force
 gh label create Release-Patch -R "$repo" --color B60205 --description "Correcao compativel" --force
+echo "Release-Major, Release-Minor, Release-Patch"
 
 step "ambientes"
 for env in DSV TST HMG; do
@@ -42,17 +55,17 @@ EOF
 then
   echo "PRD (aprovacao: $reviewer)"
 else
-  warn "PRD sem revisor: em repositorio privado de conta pessoal a regra exige plano pago"
+  warn "PRD sem revisor: em repositorio privado fora do Enterprise a regra nao existe"
   gh api -X PUT "repos/$repo/environments/PRD" --silent
 fi
 
-step "permissao do GITHUB_TOKEN para criar PR (back-merge)"
+step "permissao do GITHUB_TOKEN para criar PR (back-merge, GitOps)"
 gh api -X PUT "repos/$repo/actions/permissions/workflow" \
   -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true --silent
+echo "ok"
 
-step "regra da main: so por PR, sem force push, sem delecao, Release Validation verde e branch atualizada"
-gh api -X POST "repos/$repo/rulesets" --input - --silent <<'EOF' || warn "ruleset da main nao criado (ja existe ou plano nao permite)"
-{
+step "regras"
+upsert_ruleset '{
   "name": "main-protection",
   "target": "branch",
   "enforcement": "active",
@@ -65,24 +78,20 @@ gh api -X POST "repos/$repo/rulesets" --input - --silent <<'EOF' || warn "rulese
       "dismiss_stale_reviews_on_push": true,
       "require_code_owner_review": false,
       "require_last_push_approval": false,
-      "required_review_thread_resolution": false}},
+      "required_review_thread_resolution": false,
+      "allowed_merge_methods": ["merge"]}},
     {"type": "required_status_checks", "parameters": {
       "strict_required_status_checks_policy": true,
-      "required_status_checks": [{"context": "Start Release / Release Validation"}]}}
+      "required_status_checks": [{"context": "Pipeline / Gate"}]}}
   ]
-}
-EOF
-
-step "regra de tags: imutaveis (nao se apaga nem se move uma versao publicada)"
-gh api -X POST "repos/$repo/rulesets" --input - --silent <<'EOF' || warn "ruleset de tags nao criado (ja existe ou plano nao permite)"
-{
+}'
+upsert_ruleset '{
   "name": "tags-imutaveis",
   "target": "tag",
   "enforcement": "active",
   "conditions": {"ref_name": {"include": ["~ALL"], "exclude": []}},
   "rules": [{"type": "deletion"}, {"type": "update"}]
-}
-EOF
+}'
 
 step "pronto"
 echo "Proximo passo: docs/06-laboratorio.md"

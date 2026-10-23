@@ -1,0 +1,18 @@
+# Camada da aplicacao: rotinas agendadas da plataforma.
+name: Housekeeping
+
+on:
+  schedule:
+    - cron: "17 11,19 * * 1-5"   # 08:17 e 16:17 em UTC-3, dias uteis
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  pending-approvals:
+    name: Pending Approvals
+    uses: ./.github/workflows/ops-pending-approvals.yml
+    with:
+      older-than-hours: 4

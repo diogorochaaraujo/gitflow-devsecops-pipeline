@@ -1,37 +1,42 @@
-# 07 · Oportunidades de melhoria no modelo de referência
+# 07 · Lições do modelo de referência
 
-Observado nas execuções do modelo de referência (ordem dos jobs, tempos, saídas)
-e comparado com o que este template faz. Ordenado por impacto. Cada item diz o
-risco, a proposta e se o template já aplica.
+Este template nasceu do estudo de uma esteira corporativa: workflows centralizados, rulesets de organização, scanners
+corporativos, deploy por IaC. O desenho de duas camadas funciona. Mas o
+histórico de execuções mostrou padrões de falha que se repetem, e cada um virou
+uma decisão aqui.
 
-| # | Observado | Risco | Proposta | Template |
-|---|---|---|---|---|
-| 1 | Workflows centrais referenciados em **`@main`** | uma mudança no template central muda a esteira de todos os repositórios no mesmo instante, sem rollout gradual nem rollback | publicar a plataforma com tags SemVer (`@v3`), mover a major por canal e fixar por SHA nos repositórios críticos | ✅ separação prevê `@v1` |
-| 2 | A cada execução, o pipeline **sincroniza times, Environments e rulesets** do repositório (~10 s e várias chamadas de API por run) | latência e cota de API desperdiçadas; um erro de permissão na sincronização quebra build que nada tem a ver com isso | reconciliar configuração de repositório num job agendado (ou via IaC de GitHub), fora do caminho do build | ✅ `bootstrap-repo.sh` idempotente |
-| 3 | `secrets: inherit` em todo repositório de aplicação | o template central recebe todos os segredos de todos os repositórios | passar só o necessário; segredo de deploy por Environment; OIDC onde der | ✅ removido |
-| 4 | No snapshot, o **deploy em DSV começa junto com o scan de container** (os dois partem do fim do build) | imagem com CVE crítica chega ao DSV antes do resultado do scan | deploy depende do scan da imagem | ✅ `needs: [security, build]` |
-| 5 | Start Release **reconstrói** a imagem (~19 min) e o Build cria a **tag da RC antes** dos gates de segurança | RC tagueada que nunca poderia ir para produção; tempo dobrado de build | build único por commit; a RC é só uma tag nova do digest já analisado, criada depois do gate | ✅ tag só após *Release Validation* |
-| 6 | O build e o scan de segurança correm em paralelo, mas um **scan reprovado não cancela o build** | 15+ min de runner gastos num resultado já decidido | falha rápida: o job de agregação cancela o run assim que um gate obrigatório reprova | ⚠️ não aplicado (agregação no fim) |
-| 7 | Downloads de dependência a cada build, sem cache aparente (centenas de `Downloading ... .pom`) | build lento, pressão no proxy de artefatos | cache de dependências por lockfile no runner ou no buildx (`cache-to: type=gha`) | ✅ cache do buildx |
-| 8 | Start Release não reage a **troca de label** (`types: opened, reopened, synchronize`) | o dev coloca o label e precisa de um push vazio para revalidar | incluir `labeled`/`unlabeled` | ✅ |
-| 9 | Após o merge, nada traz a `main` de volta para a branch de integração | o próximo PR de release nasce "1 commit atrás" e é recusado; o conserto manual vira rotina (branch `update-main` em todo repo) | PR de back-merge automático no Finish Release | ✅ |
-| 10 | Snapshot faz deploy de **qualquer branch** no DSV | duas tarefas em paralelo se sobrescrevem no mesmo ambiente | deploy só da branch de integração; tarefas só build e scan (ou ambientes efêmeros por PR) | ✅ `SnapshotBranches` |
-| 11 | **Diff de IaC desligado** por padrão no deploy | mudança de infraestrutura entra sem pré-visualização | diff obrigatório em HMG/PRD, anexado ao run para o aprovador ler antes de aprovar | ⚠️ `redeploy diff` existe; não é etapa obrigatória |
-| 12 | **Análise de qualidade (Sonar) só no Finish Release**, depois do merge | o Quality Gate reprova código que já está na `main` | análise no PR de release, com o mesmo gate | ⚠️ Sonar não incluído |
-| 13 | Rollback automático só em HMG/PRD; nos demais, falha **desativa o serviço** | DSV fora do ar após qualquer deploy ruim | circuit breaker com rollback em todo ambiente compartilhado | ✅ kind mostra logs e falha; ecs depende do serviço |
-| 14 | Serviços de release em HMG/TST nomeados **com a versão** (`<app>-<env>-<versão>-service`), e versões antigas continuam existindo | recursos órfãos acumulando custo; regra de ALB por versão | um serviço por ambiente, versão só na task definition | ✅ `<app>-<env>` |
-| 15 | Prioridade de regra do ALB **digitada à mão** por ambiente (301, 302, 303...) | colisão entre ambientes que dividem o ALB; erro só aparece no deploy | derivar a prioridade de (aplicação, ambiente), ou validar unicidade no *Prepare Deploy* | ⚠️ documentado, não implementado |
-| 16 | Actions e imagens referenciadas por tag mutável (`@v4`, `:latest`) | supply chain: tag reapontada executa outro código | fixar por SHA + bot de atualização | ⚠️ tags fixas de versão; SHA pendente |
-| 17 | Nome do workflow validado **por nome de arquivo** (o Start Release confere se o arquivo se chama `start-release.yml`) | rigidez sem ganho de segurança (o ruleset de push já protege) | validar o `job_workflow_ref` da chamada, não o nome do arquivo | — |
+## O que o histórico mostrou e o que o template faz
 
-## Por onde começar
+| # | Observado | Efeito | Aqui |
+|---|---|---|---|
+| 1 | **Erros de processo e de configuração** (label ausente, branch atrás da main, chave YAML digitada errado, cadastro faltando) eram uma parcela grande das falhas, e só apareciam depois de minutos de pipeline | runner gasto, ciclo lento, ruído que esconde falha real | schema + validação de PR no *Resolve*: falha em segundos, com o campo exato |
+| 2 | **Nenhum teste unitário rodava na esteira**: testes pulados por flag no build, scripts de teste inexistentes ignorados, lint não bloqueante; a análise de qualidade de uma stack olhava só o Dockerfile | o quality gate passava sem medir nada | teste obrigatório no módulo da stack; `java` usa `verify` |
+| 3 | **Gate de segurança só bloqueava na release**: no snapshot a violação aparecia no log e passava | a release virava a primeira vez que alguém olhava, e a maioria das candidatas era reprovada | mesmos gates no snapshot; o *skip* é exceção explícita |
+| 4 | **A imagem candidata era publicada antes dos gates** e o deploy de DSV corria em paralelo ao scan da imagem | candidatas que nunca poderiam ir para produção; imagem não analisada em ambiente | *Stamp* só depois do *Gate*; deploy depende do scan |
+| 5 | **Build sem cache**, com dependências instaladas duas vezes (no builder da stack e de novo no `docker build`) | builds longos e caros | cache por stack (`setup-*`) + cache de camadas do buildx |
+| 6 | **Deploys de produção expiravam esperando aprovação** (30 dias), sem aviso | entrega perdida em silêncio | *Housekeeping*: issue única com o que está pendente e quando expira |
+| 7 | **Deploy em DSV a partir de qualquer branch**, inclusive de bots | uma tarefa sobrescrevia a outra no ambiente compartilhado | só a branch de integração faz deploy; bot só testa |
+| 8 | PRs de **bot falhavam** por falta de segredos | ruído constante no histórico | o resolver reconhece bot: testa e analisa, sem publicar |
+| 9 | Stack de IaC presa em estado de **rollback incompleto** travava os deploys seguintes até intervenção manual | ambiente parado por dias | rollback automático no driver; GitOps tira o pipeline do caminho |
+| 10 | **Workflows centrais em `@main`**, sem versão | uma mudança na plataforma atinge todos os repositórios no mesmo instante | plataforma com tags imutáveis; aplicação pina por SHA com quarentena |
+| 11 | **`secrets: inherit`** em todo repositório | o template central recebe todos os segredos de todos os repositórios | nenhum `inherit`; segredos de deploy por Environment; OIDC |
+| 12 | A cada execução, o pipeline **reconfigurava o repositório** (times, ambientes, regras) | latência e falhas que nada têm a ver com o código | governança aplicada uma vez, por script idempotente, no nível da organização |
+| 13 | A **análise de erro com IA** era útil em erro determinístico, genérica em achado de segurança, e frequentemente terminava em "consulte o time de plataforma" | o diagnóstico não virava ação | classificação determinística por regras versionadas, com "o que fazer" por classe |
+| 14 | **Sem prova de origem** da imagem: o deploy confiava na tag | qualquer imagem com a tag certa no registry seria implantada | attestation no build, verificação no deploy, digest em produção |
+| 15 | **Diff de IaC desligado** por padrão | mudança de infraestrutura entrava sem pré-visualização | `redeploy diff`; em GitOps o diff é o próprio PR |
+| 16 | Rótulo de release **major usado na maioria das releases** | versão perde significado (todo release "quebra compatibilidade") | opção `versioning: conventional`: a versão sai do que mudou |
 
-Os três de maior retorno por esforço, para propor primeiro:
+## Para propor primeiro
 
-1. **#4 + #5**: reordenar dependências e mover a criação da tag. Mudança pequena
-   no template central, efeito em todos os repositórios: nenhuma imagem sem scan
-   em ambiente, nenhuma RC "fantasma".
-2. **#9**: back-merge automático. Elimina uma tarefa manual recorrente e o erro
-   de pipeline mais comum entre os times.
-3. **#1**: versionar a plataforma. É a pré-condição para mudar qualquer outra
-   coisa no template sem risco para todo mundo ao mesmo tempo.
+Se o objetivo é melhorar uma esteira existente desse tipo, os de maior retorno
+por esforço:
+
+1. **#1, validação antecipada.** Um job de segundos antes de tudo elimina a
+   maior classe de falhas evitáveis. Não muda nenhum gate.
+2. **#3 + #4, gates no lugar certo.** Reordenar dependências e mover a criação
+   da tag. Mudança pequena no template central, com efeito em todos os
+   repositórios.
+3. **#10, versionar a plataforma.** É a pré-condição para mudar qualquer outra
+   coisa sem risco para todo mundo ao mesmo tempo.
+4. **#6, aprovações pendentes.** Algumas horas de trabalho, e acaba a entrega
+   perdida em silêncio.

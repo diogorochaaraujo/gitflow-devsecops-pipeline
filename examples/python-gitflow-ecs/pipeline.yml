@@ -1,0 +1,27 @@
+# Cenario: servico Python em AWS ECS Fargate, gitflow com label.
+# Infra (cluster, ALB, servico <app>-<env>) criada pela esteira de IaC; aqui so troca a imagem.
+app:
+  name: motor-calculo
+
+flow:
+  model: gitflow
+  integrationBranch: dsv
+  versioning: label
+  environments:
+    snapshot: [DSV]
+    candidate: [HMG]
+    release: [PRD]
+
+build:
+  stack: python
+  python:
+    version: "3.12"
+    install: pip install -r requirements.txt -r requirements-dev.txt
+    lint: ruff check .
+    test: pytest -q --cov --cov-report=xml
+  container:
+    context: .
+    dockerfile: Dockerfile
+
+security:
+  skipOnSnapshot: []

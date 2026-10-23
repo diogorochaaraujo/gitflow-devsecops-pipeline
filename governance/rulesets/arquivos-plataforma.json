@@ -1,0 +1,25 @@
+{
+  "name": "arquivos-da-plataforma",
+  "target": "push",
+  "enforcement": "active",
+  "conditions": {
+    "repository_property": { "include": [{ "name": "pipeline", "property_values": ["managed"] }], "exclude": [] }
+  },
+  "bypass_actors": [
+    { "actor_type": "Team", "actor_id": "__PLATFORM_TEAM_ID__", "bypass_mode": "always" }
+  ],
+  "rules": [
+    {
+      "type": "file_path_restriction",
+      "parameters": {
+        "restricted_file_paths": [
+          ".github/workflows/**",
+          ".github/actions/**",
+          ".github/CODEOWNERS",
+          ".github/configs/security-config.yml",
+          ".trivyignore.yaml"
+        ]
+      }
+    }
+  ]
+}
