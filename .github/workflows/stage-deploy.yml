@@ -20,7 +20,10 @@ on:
         type: string
         default: deploy
       ref:
-        description: Commit de onde vem a deploy-config (vazio = o do evento)
+        description: >-
+          Commit de onde vem deploy-config, config/ e migracoes. Vazio = o commit
+          que construiu a versao (label org.opencontainers.image.revision da imagem):
+          um redeploy/rollback entrega a versao com a configuracao DELA.
         type: string
         default: ""
       platform-repository:
@@ -47,10 +50,33 @@ jobs:
       dast: ${{ steps.matrix.outputs.dast }}
       provenance: ${{ steps.matrix.outputs.provenance }}
       signer: ${{ steps.matrix.outputs.signer }}
+      source-ref: ${{ steps.source.outputs.ref }}
+    permissions:
+      contents: read
+      packages: read
     steps:
+      - id: source
+        name: Source Commit
+        env:
+          REF: ${{ inputs.ref }}
+          VERSION: ${{ inputs.version }}
+          TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$REF" ] && [ -n "$VERSION" ]; then
+            echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+            name=$(gh api "repos/$GITHUB_REPOSITORY/contents/pipeline.yml" -H "Accept: application/vnd.github.raw" | yq '.app.name')
+            image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$name:$VERSION"
+            REF=$(docker buildx imagetools inspect "$image" --format '{{json .Image}}' \
+              | jq -r 'if type == "object" and has("config") then .config.Labels["org.opencontainers.image.revision"]
+                       else (to_entries[0].value.config.Labels["org.opencontainers.image.revision"]) end // empty')
+            [ -n "$REF" ] || { echo "::error::$image sem label de revisao: informe o commit (ref) explicitamente."; exit 1; }
+            echo "Versao $VERSION construida em $REF: deploy-config, config/ e migracoes desse commit."
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ steps.source.outputs.ref }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -108,7 +134,7 @@ jobs:
       # configuracao por ambiente (config/) e migracoes (db/) vivem na aplicacao
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.prepare-deploy.outputs.source-ref }}
           path: .app
           persist-credentials: false
 
