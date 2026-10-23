@@ -14,7 +14,7 @@ metadata:
   namespace: prd
   labels:
     app.kubernetes.io/name: web-api
-    app.kubernetes.io/version: "0.2.0"
+    app.kubernetes.io/version: "0.2.1"
     environment: PRD
 spec:
   replicas: 2
@@ -30,7 +30,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: web-api
-        app.kubernetes.io/version: "0.2.0"
+        app.kubernetes.io/version: "0.2.1"
       annotations:
         checksum/config: 72ebe6b66f6e8126
     spec:
@@ -42,13 +42,13 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web-api
-          image: ghcr.io/diogorochaaraujo/web-api@sha256:716da99cc0dfd78175c45c2b8bd286b8cfb594e61395c49cbabaa7b9202dde4f
+          image: ghcr.io/diogorochaaraujo/web-api@sha256:43a207ad3c85e9b88d8e58f9de9366ff238591187668027c9f93af0a05449f89
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
             - name: APP_VERSION
-              value: "0.2.0"
+              value: "0.2.1"
             - name: APP_ENV
               value: PRD
             - name: PORT
