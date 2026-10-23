@@ -51,10 +51,32 @@ jobs:
       provenance: ${{ steps.matrix.outputs.provenance }}
       signer: ${{ steps.matrix.outputs.signer }}
       source-ref: ${{ steps.source.outputs.ref }}
+      platform-repository: ${{ steps.platform.outputs.repository }}
+      platform-ref: ${{ steps.platform.outputs.ref }}
     permissions:
       contents: read
       packages: read
+      actions: read
     steps:
+      # o contexto `github` e do chamador: a plataforma descobre de qual commit
+      # foi chamada (pinada, e o SHA do pino; local, o commit do proprio run)
+      - id: platform
+        name: Platform Version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_IN: ${{ inputs.platform-repository }}
+          REF_IN: ${{ inputs.platform-ref }}
+        run: |
+          if [ -n "$REF_IN" ]; then
+            repo=${REPO_IN:-$GITHUB_REPOSITORY}; sha=$REF_IN
+          else
+            w=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              --jq '[.referenced_workflows[] | select(.path | test("/\\.github/workflows/(platform|stage-deploy)\\.yml@"))][0] | "\(.path) \(.sha)"')
+            repo=$(cut -d/ -f1,2 <<<"$w"); sha=${w##* }
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::versao da plataforma nao identificada ($w)"; exit 1; }
+          { echo "repository=$repo"; echo "ref=$sha"; } >> "$GITHUB_OUTPUT"
+          echo "Plataforma: $repo@$sha"
       - id: source
         name: Source Commit
         env:
@@ -80,8 +102,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ inputs.platform-repository || github.repository }}
-          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          repository: ${{ steps.platform.outputs.repository }}
+          ref: ${{ steps.platform.outputs.ref }}
           path: .platform
           persist-credentials: false
       - name: Validate Input
@@ -100,7 +122,7 @@ jobs:
         env:
           ENVIRONMENTS: ${{ inputs.environments }}
           VERSION: ${{ inputs.version }}
-          PLATFORM_REPO: ${{ inputs.platform-repository || github.repository }}
+          PLATFORM_REPO: ${{ steps.platform.outputs.repository }}
         run: |
           matrix=$(.platform/scripts/render-deploy-matrix.sh --by-env .github/configs/deploy-config.yml "$ENVIRONMENTS")
           {
@@ -144,8 +166,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ inputs.platform-repository || github.repository }}
-          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          repository: ${{ needs.prepare-deploy.outputs.platform-repository }}
+          ref: ${{ needs.prepare-deploy.outputs.platform-ref }}
           path: .platform
           persist-credentials: false
       # configuracao por ambiente (config/) e migracoes (db/) vivem na aplicacao

@@ -31,7 +31,12 @@ jobs:
     name: Resolve
     runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     outputs:
+      platform-repository: ${{ steps.platform.outputs.repository }}
+      platform-ref: ${{ steps.platform.outputs.ref }}
       stage: ${{ steps.route.outputs.stage }}
       build: ${{ steps.route.outputs.build }}
       stamp: ${{ steps.route.outputs.stamp }}
@@ -48,6 +53,25 @@ jobs:
       pipeline: ${{ steps.prep.outputs.pipeline }}
       security: ${{ steps.prep.outputs.security }}
     steps:
+      # o contexto `github` e do chamador: a plataforma descobre de qual commit
+      # foi chamada (pinada, e o SHA do pino; local, o commit do proprio run)
+      - id: platform
+        name: Platform Version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_IN: ${{ inputs.platform-repository }}
+          REF_IN: ${{ inputs.platform-ref }}
+        run: |
+          if [ -n "$REF_IN" ]; then
+            repo=${REPO_IN:-$GITHUB_REPOSITORY}; sha=$REF_IN
+          else
+            w=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              --jq '[.referenced_workflows[] | select(.path | test("/\\.github/workflows/(platform|stage-deploy)\\.yml@"))][0] | "\(.path) \(.sha)"')
+            repo=$(cut -d/ -f1,2 <<<"$w"); sha=${w##* }
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::versao da plataforma nao identificada ($w)"; exit 1; }
+          { echo "repository=$repo"; echo "ref=$sha"; } >> "$GITHUB_OUTPUT"
+          echo "Plataforma: $repo@$sha"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -55,8 +79,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ inputs.platform-repository || github.repository }}
-          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          repository: ${{ steps.platform.outputs.repository }}
+          ref: ${{ steps.platform.outputs.ref }}
           path: .platform
           persist-credentials: false
 
@@ -74,7 +98,8 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           ACTOR: ${{ github.actor }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          PLATFORM_REPO: ${{ inputs.platform-repository || github.repository }}
+          PLATFORM_REPO: ${{ steps.platform.outputs.repository }}
+          PLATFORM_REF: ${{ steps.platform.outputs.ref }}
         run: |
           route=$(PIPELINE=$(yq -o=json -I=0 '.' pipeline.yml) .platform/scripts/resolve.sh)
           echo "$route"
@@ -92,6 +117,7 @@ jobs:
             *)         code="-" ;;
           esac
           echo "### Etapa $code · \`$stage\` ([mapa do processo]($GITHUB_SERVER_URL/$PLATFORM_REPO/blob/main/docs/00-mapa-do-processo.md))" >> "$GITHUB_STEP_SUMMARY"
+          echo "Plataforma \`$PLATFORM_REPO@${PLATFORM_REF:0:12}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - id: pr
         name: Commits Validations
@@ -150,8 +176,8 @@ jobs:
       ref: ${{ needs.resolve.outputs.head-sha }}
       publish: ${{ needs.resolve.outputs.publish == 'true' }}
       skip-container-scan: ${{ contains(fromJSON(needs.resolve.outputs.skip), 'container') }}
-      platform-repository: ${{ inputs.platform-repository }}
-      platform-ref: ${{ inputs.platform-ref }}
+      platform-repository: ${{ needs.resolve.outputs.platform-repository }}
+      platform-ref: ${{ needs.resolve.outputs.platform-ref }}
 
   gate:
     name: Gate
@@ -202,14 +228,15 @@ jobs:
       pull-requests: write
       packages: read
       attestations: read
+      actions: read
       id-token: write
     uses: ./.github/workflows/stage-deploy.yml
     with:
       environments: ${{ needs.resolve.outputs.pre-envs }}
       version: ${{ needs.resolve.outputs.version }}
       ref: ${{ needs.resolve.outputs.head-sha }}
-      platform-repository: ${{ inputs.platform-repository }}
-      platform-ref: ${{ inputs.platform-ref }}
+      platform-repository: ${{ needs.resolve.outputs.platform-repository }}
+      platform-ref: ${{ needs.resolve.outputs.platform-ref }}
 
   promote:
     name: Promote
@@ -238,14 +265,15 @@ jobs:
       pull-requests: write
       packages: read
       attestations: read
+      actions: read
       id-token: write
     uses: ./.github/workflows/stage-deploy.yml
     with:
       environments: ${{ needs.resolve.outputs.post-envs }}
       version: ${{ needs.promote.outputs.version }}
       ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
-      platform-repository: ${{ inputs.platform-repository }}
-      platform-ref: ${{ inputs.platform-ref }}
+      platform-repository: ${{ needs.resolve.outputs.platform-repository }}
+      platform-ref: ${{ needs.resolve.outputs.platform-ref }}
 
   # sem isto o proximo PR de release nasce "1 commit atras da main" (o merge commit)
   back-merge:
@@ -283,5 +311,5 @@ jobs:
       stage: ${{ needs.resolve.outputs.stage || 'resolve' }}
       version: ${{ needs.promote.outputs.version || needs.resolve.outputs.version }}
       results: ${{ toJSON(needs) }}
-      platform-repository: ${{ inputs.platform-repository }}
-      platform-ref: ${{ inputs.platform-ref }}
+      platform-repository: ${{ needs.resolve.outputs.platform-repository }}
+      platform-ref: ${{ needs.resolve.outputs.platform-ref }}
