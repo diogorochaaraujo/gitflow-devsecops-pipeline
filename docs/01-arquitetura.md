@@ -12,7 +12,7 @@ plataforma**, consumido por configuração:
 | **Aplicação** | `ci-cd.yml` (~20 linhas: gatilhos e permissões) + `pipeline.yml` + `deploy-config.yml` | o time da aplicação precisa de algo diferente *dentro do que o contrato permite* |
 | **Orquestrador** | `platform.yml`: roteia o evento para os estágios certos | muda o modelo de entrega |
 | **Estágios** | `stage-security`, `stage-build`, `stage-release`, `stage-deploy`, `stage-report` (reusable workflows) | muda uma etapa para todo mundo |
-| **Módulos** | `build-<stack>`, `build-container`, `verify-artifact`, `deploy-<driver>` (composite actions) | entra uma stack ou um alvo de deploy novo |
+| **Módulos** | `build-<stack>`, `build-container`, `verify-artifact`, `deploy-<driver>` (`kubernetes`, `gitops-pr`, `ecs`, `flyway`), como composite actions | entra uma stack ou um alvo de deploy novo |
 | **Governança** | rulesets, política de Actions, OIDC, propriedades da org | muda a regra do jogo |
 
 ```mermaid
@@ -24,7 +24,7 @@ flowchart TB
   SEC & B --> G{"Gate"}
   G --> REL["stage-release<br/>stamp · promote"]
   REL --> D["stage-deploy"]
-  D --> V["verify-artifact"] --> MD["deploy-kubernetes | deploy-gitops-pr | deploy-ecs"]
+  D --> V["verify-artifact"] --> MD["deploy-kubernetes | deploy-gitops-pr | deploy-ecs | deploy-flyway"]
   P --> REP["stage-report<br/>audit · error analysis"]
 ```
 

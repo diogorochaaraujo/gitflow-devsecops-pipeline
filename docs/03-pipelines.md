@@ -60,6 +60,17 @@ flowchart LR
 `diff`, `destroy`. Usa o mesmo `stage-deploy`, então passa pela mesma
 verificação de attestation e pela mesma aprovação de Environment.
 
+**A versão vai com a configuração dela.** Sem `ref` explícito, o *Prepare Deploy*
+lê o commit gravado na imagem (`org.opencontainers.image.revision`) e usa o
+`deploy-config.yml`, o `config/` e as migrações **daquele commit**. Um rollback
+para a `1.4.0` entrega o código, a configuração e o esquema da `1.4.0`, e não o
+código antigo com a configuração do HEAD.
+
+Consequência para a plataforma: **o contrato só evolui de forma compatível.** Um
+rollback lê um `deploy-config.yml` antigo com os scripts atuais. Um campo novo
+precisa ter padrão, e um campo removido precisa continuar sendo aceito (e
+ignorado) por algumas versões.
+
 ## Report
 
 **Audit** grava um JSON por execução (etapa, versão, commit, quem disparou,

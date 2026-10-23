@@ -9,7 +9,8 @@ escreve o código são **vários fornecedores**.
 - **Fluxo escolhido por configuração**: `gitflow` (integração → PR de release com
   label) ou `trunk` (main + Conventional Commits).
 - **Módulos plugáveis**: build por stack (`node`, `python`, `java`, `container`) e
-  deploy por driver (`kubernetes`, `gitops-pr`, `ecs`).
+  deploy por driver (`kubernetes`, `gitops-pr`, `ecs`, `flyway`), escolhido por
+  artefato.
 - **Gates de segurança** (segredos, SAST, SCA, IaC, imagem, DAST) e um contrato
   com **schema**, para que erro de configuração falhe em segundos.
 - **Prova de origem**: toda imagem sai com SBOM e attestation assinada, e
@@ -35,7 +36,7 @@ flowchart LR
   end
   subgraph PLAT["plataforma (cliente)"]
     O["platform.yml<br/>resolve → gates → release → deploy"]
-    M["módulos<br/>build-node · build-python · build-java · build-container<br/>deploy-kubernetes · deploy-gitops-pr · deploy-ecs"]
+    M["módulos<br/>build-node · build-python · build-java · build-container<br/>deploy-kubernetes · deploy-gitops-pr · deploy-ecs · deploy-flyway"]
     O --> M
   end
   subgraph GOV["governança (org)"]
@@ -70,6 +71,17 @@ flowchart LR
 | **Plataforma: módulos** | `.github/actions/*`, `scripts/`, `templates/`, `schemas/` | time de plataforma |
 | **Governança** | `governance/`, `scripts/governance/` | administração da organização |
 | **Exemplos** | `examples/` (Node + trunk + GitOps, Java + gitflow + AKS, Python + gitflow + ECS) | — |
+
+## Estado de validação
+
+| Exercitado de ponta a ponta neste repositório | Referência, ainda não exercitado |
+|---|---|
+| fluxo `gitflow` completo: snapshot → DSV → candidata em HMG → promoção com o mesmo digest → PRD por GitOps → back-merge | fluxo `trunk` (roteamento coberto por teste) |
+| recusas em segundos: label, chamado, configuração inválida | driver `ecs`, cluster `aks` e `kubeconfig` |
+| attestation no build e **recusa** de imagem sem prova de origem | agente GitOps aplicando a branch de estado (Argo CD/Flux) |
+| Flyway (banco efêmero) antes da API; ConfigMap por ambiente | External Secrets num cluster real |
+| rollback com a configuração da própria versão | governança de organização (`apply-org.sh` só em simulação) |
+| aprovação de PRD, análise de erros classificada, Housekeeping | separação real plataforma × aplicação em dois repositórios |
 
 ## Validação local
 
