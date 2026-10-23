@@ -144,7 +144,8 @@ check "classifica: desconhecido" "nao classificado" "$(cls 'algo totalmente novo
 pol=$(mktemp -d); ( cd "$pol" && git init -q -b main && git config user.email t@t && git config user.name t \
   && git commit -q --allow-empty -m i && git tag 1.2.0 && git tag 1.3.0-7 )
 flow='{"flow":{"environments":{"snapshot":["DSV"],"candidate":["HMG"],"release":["PRD","CTG"]}}}'
-pp() { ( cd "$pol" && PIPELINE=$flow "$s/check-deploy-policy.sh" "$1" "$2" >/dev/null 2>&1 ); echo $?; }
+# GITHUB_REPOSITORY vazio: o teste consulta as tags do repositorio de teste, nunca as do repositorio real (no CI a variavel existe)
+pp() { ( cd "$pol" && GITHUB_REPOSITORY= PIPELINE=$flow "$s/check-deploy-policy.sh" "$1" "$2" >/dev/null 2>&1 ); echo $?; }
 check "politica: release publicada em PRD" "0" "$(pp PRD 1.2.0)"
 check "politica: RC em PRD recusada" "1" "$(pp PRD 1.3.0-7)"
 check "politica: snapshot em PRD recusado" "1" "$(pp PRD 1.3.0-9-SNAPSHOT)"
