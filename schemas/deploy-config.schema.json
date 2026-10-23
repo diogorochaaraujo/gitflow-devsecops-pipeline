@@ -9,21 +9,38 @@
     "defaults": { "$ref": "#/$defs/settings", "required": ["driver"] },
     "accounts": {
       "type": "object",
-      "propertyNames": { "pattern": "^[A-Z][A-Z0-9]{1,9}$" },
+      "propertyNames": { "$ref": "#/$defs/envName" },
       "additionalProperties": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,19}$" }
     },
     "artifacts": {
       "type": "object",
       "minProperties": 1,
-      "propertyNames": { "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$" },
+      "propertyNames": { "$ref": "#/$defs/artifactName" },
       "additionalProperties": { "$ref": "#/$defs/artifact" }
     },
     "envs": {
       "type": "object",
-      "propertyNames": { "pattern": "^[A-Z][A-Z0-9]{1,9}$" },
+      "propertyNames": { "$ref": "#/$defs/envName" },
       "additionalProperties": {
         "allOf": [{ "$ref": "#/$defs/settings" }],
         "properties": {
+          "reviewers": {
+            "description": "quem aprova o deploy neste ambiente (aplicado pelo bootstrap, nao a cada execucao)",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "maxProperties": 1,
+              "properties": {
+                "user": { "type": "string" },
+                "team": { "type": "string", "pattern": "^[^/]+/[^/]+$" }
+              }
+            }
+          },
+          "waitTimer": { "description": "minutos de espera antes do deploy", "type": "integer", "minimum": 0, "maximum": 43200 },
           "artifacts": {
             "type": "object",
             "additionalProperties": { "$ref": "#/$defs/artifact" }
@@ -33,10 +50,13 @@
     }
   },
   "$defs": {
+    "envName": { "type": "string", "pattern": "^[A-Z][A-Z0-9]{1,9}$" },
+    "artifactName": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$" },
+    "driver": { "enum": ["kubernetes", "gitops-pr", "ecs", "flyway"] },
     "settings": {
       "type": "object",
       "properties": {
-        "driver": { "enum": ["kubernetes", "gitops-pr", "ecs"] },
+        "driver": { "$ref": "#/$defs/driver" },
         "kubernetes": {
           "type": "object",
           "additionalProperties": false,
@@ -44,7 +64,8 @@
             "cluster": { "enum": ["kind", "aks", "kubeconfig"] },
             "resourceGroup": { "type": "string" },
             "clusterName": { "type": "string" },
-            "namespace": { "type": "string" }
+            "namespace": { "type": "string" },
+            "secretStore": { "description": "ClusterSecretStore do External Secrets Operator", "type": "string" }
           }
         },
         "gitops": {
@@ -64,6 +85,15 @@
             "cluster": { "type": "string" }
           }
         },
+        "flyway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ephemeral": { "description": "valida as migracoes num banco descartavel (laboratorio, PR)", "type": "boolean" }
+          }
+        },
+        "reviewers": true,
+        "waitTimer": true,
         "artifacts": { "type": "object" }
       }
     },
@@ -71,12 +101,31 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "driver": { "$ref": "#/$defs/driver" },
+        "order": { "description": "ordem dentro do ambiente (menor primeiro; padrao 100)", "type": "integer", "minimum": 0, "maximum": 999 },
+        "containerPort": { "description": "sem porta = worker: sem Service, sem probe, sem smoke test", "type": "integer", "minimum": 1, "maximum": 65535 },
         "healthPath": { "type": "string", "pattern": "^/" },
+        "args": { "type": "array", "items": { "type": "string" } },
         "replicas": { "type": "integer", "minimum": 0, "maximum": 50 },
         "cpu": { "type": "integer", "minimum": 50 },
         "memory": { "type": "integer", "minimum": 64 },
-        "service": { "type": "string" }
+        "rolloutTimeout": { "description": "segundos para o rollout estabilizar (padrao 180)", "type": "integer", "minimum": 30, "maximum": 1800 },
+        "secrets": {
+          "description": "nomes dos segredos, resolvidos no cofre em <app>/<env>/<NOME>",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,62}$" }
+        },
+        "service": { "type": "string" },
+        "flyway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "database": { "enum": ["postgresql"] },
+            "locations": { "type": "string" },
+            "schema": { "type": "string" }
+          }
+        }
       }
     }
   }

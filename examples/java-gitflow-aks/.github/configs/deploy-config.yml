@@ -1,9 +1,12 @@
+# Cenario: API Spring Boot + worker + banco, em AKS, com aprovacao do cliente
+# em HMG e PRD e contingencia depois de producao (release: [PRD, CTG]).
 defaults:
   driver: kubernetes
   kubernetes:
     cluster: aks
     resourceGroup: rg-apps-nprd
     clusterName: aks-apps-nprd
+    secretStore: cofre-nprd          # ClusterSecretStore do External Secrets
 
 # vars por grupo: AZURE_CLIENT_ID_NPRD, AZURE_SUBSCRIPTION_ID_NPRD, ..._PRD, e AZURE_TENANT_ID
 accounts:
@@ -11,22 +14,52 @@ accounts:
   TST: NPRD
   HMG: NPRD
   PRD: PRD
+  CTG: PRD
 
 artifacts:
+  api-contratos-db:                  # segredos DB_URL/DB_USER/DB_PASSWORD em cada Environment
+    driver: flyway
+    order: 10
+    flyway:
+      database: postgresql
+      locations: db/migrations
+      schema: contratos
   api-contratos:
     containerPort: 8080
     healthPath: /actuator/health
     replicas: 2
     cpu: 500
     memory: 1024
+    rolloutTimeout: 300              # Spring sobe devagar
+    secrets: [BANCO_SENHA, API_PARCEIRO_TOKEN]   # cofre: api-contratos/<env>/<NOME>
+  api-contratos-worker:              # mesma imagem, outro processo, sem porta
+    args: ["java", "-jar", "/app/app.jar", "--spring.profiles.active=worker"]
+    replicas: 1
+    secrets: [BANCO_SENHA]
 
 envs:
+  HMG:
+    reviewers:
+      - team: minha-org/lideres-tecnicos
   PRD:
+    reviewers:
+      - team: minha-org/lideres-tecnicos
+      - team: minha-org/operacao
+    waitTimer: 10
     kubernetes:
       cluster: aks
       resourceGroup: rg-apps-prd
       clusterName: aks-apps-prd
+      secretStore: cofre-prd
     artifacts:
       api-contratos:
         replicas: 4
         memory: 2048
+  CTG:
+    reviewers:
+      - team: minha-org/operacao
+    kubernetes:
+      cluster: aks
+      resourceGroup: rg-apps-ctg
+      clusterName: aks-apps-ctg
+      secretStore: cofre-prd

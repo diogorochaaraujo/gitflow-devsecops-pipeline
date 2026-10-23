@@ -61,3 +61,12 @@ A primeira que casar vence, então regras específicas vão antes das genéricas
 - sem `${{ }}` em `run:`; `persist-credentials: false`; `timeout-minutes`;
   `permissions` mínimas no job;
 - rode `zizmor` e `actionlint` localmente (comandos no README).
+
+## Ideias de extensão já mapeadas
+
+| Necessidade | Caminho |
+|---|---|
+| **imagem em dois registries** (ex.: GHCR e um registry da nuvem de destino) | no driver de destino, copiar **por digest** com `docker buildx imagetools create --tag <destino> <origem>@sha256:...` antes do deploy. É uma cópia, não um rebuild, então a attestation continua valendo para o mesmo digest |
+| **artefato que não é imagem** (pacote zip, instalador, biblioteca) | stack nova `package`: gera o arquivo, publica como asset da GitHub Release (ou artefato OCI com `oras`) e atesta com `actions/attest-build-provenance` pelo `subject-path` |
+| **outros bancos no `flyway`** (Oracle, SQL Server) | `flyway.database` aceita novos valores; o driver troca o banco efêmero (ou exige `DB_URL`, porque nem todo banco tem imagem efêmera viável) |
+| **servidores de aplicação legados** (JBoss, IIS, WebLogic) | driver por tecnologia, mesmo contrato (`command`, `app`, `env`, `config`, `settings`), com credencial por Environment |

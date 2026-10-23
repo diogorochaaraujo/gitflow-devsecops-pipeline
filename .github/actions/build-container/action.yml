@@ -17,6 +17,12 @@ inputs:
     required: true
   cache-scope:
     required: true
+  build-args:
+    description: "CHAVE=VALOR, um por linha (sem segredo: ficam gravados na imagem)"
+    default: ""
+  attest:
+    description: registra attestation (exige repo publico ou Enterprise Cloud)
+    default: "true"
   token:
     required: true
 
@@ -47,6 +53,7 @@ runs:
         tags: ${{ inputs.image }}:${{ inputs.version }}
         provenance: mode=max
         sbom: true
+        build-args: ${{ inputs.build-args }}
         labels: |
           org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           org.opencontainers.image.revision=${{ inputs.revision }}
@@ -54,7 +61,8 @@ runs:
         cache-from: type=gha,scope=${{ inputs.cache-scope }}
         cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}
 
-    - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+    - if: inputs.attest == 'true'
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
       with:
         subject-name: ${{ inputs.image }}
         subject-digest: ${{ steps.push.outputs.digest }}

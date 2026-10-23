@@ -2,6 +2,7 @@
 #   Audit          -> evidencia estruturada: o que rodou, versao, commit, quem disparou,
 #                     resultado de cada etapa e QUEM APROVOU cada ambiente
 #   Error Analysis -> so em falha: classifica cada erro (scripts/error-hints.tsv) e diz o que fazer
+#                     (o Gate fica de fora: ele so agrega, a causa esta no job que ele aponta)
 name: Stage Report
 
 on:
@@ -90,7 +91,9 @@ jobs:
           repository: ${{ inputs.platform-repository || github.repository }}
           ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
           path: .platform
-          sparse-checkout: scripts/error-hints.tsv
+          sparse-checkout: |
+            scripts/error-hints.tsv
+            scripts/classify-error.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Classify Failures
@@ -99,7 +102,7 @@ jobs:
           HINTS: .platform/scripts/error-hints.tsv
         run: |
           jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --paginate \
-            --jq '.jobs[] | select(.conclusion == "failure") | [.id, .name, ([.steps[] | select(.conclusion == "failure") | .name] | join(", "))] | @tsv')
+            --jq '.jobs[] | select(.conclusion == "failure" and (.name | endswith("/ Gate") | not)) | [.id, .name, ([.steps[] | select(.conclusion == "failure") | .name] | join(", "))] | @tsv')
           echo "## Analise de erros" >> "$GITHUB_STEP_SUMMARY"
           while IFS=$'\t' read -r id name steps; do
             [ -n "$id" ] || continue
@@ -110,11 +113,8 @@ jobs:
               | grep -vE '^Process completed with exit code' | sort -u | head -15 || true)
             log=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" 2>/dev/null || true)
             [ -n "$errors" ] || errors=$(grep -F '##[error]' <<<"$log" | sed -E 's/^[^ ]+ ##\[error\]//' | sort -u | head -15)
-            class="nao classificado"; hint="Ler o log do job; nenhuma regra conhecida casou."
-            while IFS=$'\t' read -r regex c h; do
-              case "$regex" in ''|'#'*) continue ;; esac
-              if grep -qiE "$regex" <<<"$errors"$'\n'"$(tail -n 200 <<<"$log")"; then class=$c; hint=$h; break; fi
-            done < "$HINTS"
+            IFS=$'\t' read -r class hint < <(printf '%s\n%s\n' "$errors" "$(tail -n 200 <<<"$log")" \
+              | .platform/scripts/classify-error.sh "$HINTS")
             {
               echo "### $name"
               echo "- **step:** ${steps:-?}"

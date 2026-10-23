@@ -8,6 +8,7 @@ flow:
   model: gitflow              # gitflow | trunk
   integrationBranch: dsv      # gitflow: branch de integracao
   versioning: label           # label (Release-Major|Minor|Patch no PR) | conventional (commits)
+  changeRef: "[A-Z][A-Z0-9]+-[0-9]+"  # PR de release cita o chamado (titulo, corpo ou branch)
   environments:
     snapshot: [DSV]           # gitflow: push na branch de integracao
     candidate: [HMG]          # gitflow: PR de release | trunk: merge na main, em ordem

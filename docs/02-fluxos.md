@@ -18,7 +18,7 @@ o roteamento (`scripts/resolve.sh`).
 |---|---|---|
 | push em branch de tarefa | **snapshot**: build e gates, sem deploy | nada (o PR verifica) |
 | push na integração | **snapshot** + deploy em `snapshot` | — |
-| PR para `main` aberto/atualizado/label | **candidate**: gates, RC `X.Y.Z-N`, deploy em `candidate` | **verify**: build e gates, sem deploy |
+| PR para `main` aberto/atualizado/editado/label | **candidate**: gates, RC `X.Y.Z-N`, deploy em `candidate` | **verify**: build e gates, sem deploy |
 | push na `main` | nada (o merge do PR promove) | **candidate + promote**: RC, deploy em `candidate`, promoção, deploy em `release` |
 | PR para `main` mergeado | **promote**: RC → `X.Y.Z`, deploy em `release`, back-merge | nada (o push faz) |
 

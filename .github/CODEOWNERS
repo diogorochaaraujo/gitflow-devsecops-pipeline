@@ -15,3 +15,6 @@
 # Excecoes e gates de seguranca: time de seguranca do cliente.
 /.github/configs/security-config.yml @diogorochaaraujo
 /.trivyignore.yaml                   @diogorochaaraujo
+
+# Migracoes de banco: revisao de quem responde pelo dado (DBA / lider tecnico do cliente).
+/db/migrations/                      @diogorochaaraujo

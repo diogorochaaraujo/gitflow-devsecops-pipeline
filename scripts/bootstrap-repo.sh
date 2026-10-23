@@ -6,12 +6,16 @@
 # Numa organizacao, prefira as regras de org (scripts/governance/apply-org.sh):
 # valem para todos os repositorios e o time da aplicacao nao consegue alterar.
 #
-# uso: scripts/bootstrap-repo.sh <owner/repo> [revisor-de-producao]
+# Ambientes, aprovadores e tempo de espera vem do deploy-config.yml
+# (envs.<ENV>.reviewers / waitTimer): a regra de quem aprova e versionada e
+# revisada por PR, e aplicada aqui -- nao a cada execucao do pipeline.
+#
+# uso: scripts/bootstrap-repo.sh <owner/repo> [deploy-config.yml]
 # requer: gh autenticado com permissao de admin no repositorio
 set -euo pipefail
 
-repo=${1:?uso: bootstrap-repo.sh <owner/repo> [revisor]}
-reviewer=${2:-$(gh api user --jq .login)}
+repo=${1:?uso: bootstrap-repo.sh <owner/repo> [deploy-config.yml]}
+config=${2:-.github/configs/deploy-config.yml}
 integration=${INTEGRATION_BRANCH:-dsv}
 
 step() { printf '\n== %s\n' "$*"; }
@@ -44,20 +48,28 @@ gh label create Release-Minor -R "$repo" --color FBCA04 --description "Funcional
 gh label create Release-Patch -R "$repo" --color B60205 --description "Correcao compativel" --force
 echo "Release-Major, Release-Minor, Release-Patch"
 
-step "ambientes"
-for env in DSV TST HMG; do
-  gh api -X PUT "repos/$repo/environments/$env" --silent && echo "$env"
+step "ambientes (de $config)"
+envs=$(yq -o=json '[((.accounts // {}) | keys), ((.envs // {}) | keys)] | flatten | unique' "$config" | jq -r '.[]')
+for env in $envs; do
+  reviewers=$(yq -o=json -I=0 ".envs.$env.reviewers // []" "$config")
+  wait_min=$(yq ".envs.$env.waitTimer // 0" "$config")
+  ids='[]'
+  for row in $(jq -c '.[]' <<<"$reviewers"); do
+    if user=$(jq -er '.user // empty' <<<"$row"); then
+      id=$(gh api "users/$user" --jq .id); ids=$(jq -c --argjson id "$id" '. + [{"type":"User","id":$id}]' <<<"$ids")
+    elif team=$(jq -er '.team // empty' <<<"$row"); then
+      id=$(gh api "orgs/${team%%/*}/teams/${team#*/}" --jq .id); ids=$(jq -c --argjson id "$id" '. + [{"type":"Team","id":$id}]' <<<"$ids")
+    fi
+  done
+  body=$(jq -nc --argjson r "$ids" --argjson w "$wait_min" \
+    'if ($r | length) > 0 then {reviewers: $r, wait_timer: $w, prevent_self_review: false} else {wait_timer: $w} end')
+  if gh api -X PUT "repos/$repo/environments/$env" --input - --silent <<<"$body"; then
+    echo "$env: $(jq -r '[.[] | (.user // .team)] | if length > 0 then "aprovacao: " + join(", ") else "sem aprovacao" end' <<<"$reviewers")$([ "$wait_min" -gt 0 ] && echo ", espera ${wait_min}min")"
+  else
+    warn "$env: regra de aprovacao nao aplicada (repositorio privado fora do Enterprise?)"
+    gh api -X PUT "repos/$repo/environments/$env" --silent
+  fi
 done
-reviewer_id=$(gh api "users/$reviewer" --jq .id)
-if gh api -X PUT "repos/$repo/environments/PRD" --input - --silent <<EOF
-{"reviewers":[{"type":"User","id":$reviewer_id}],"prevent_self_review":false}
-EOF
-then
-  echo "PRD (aprovacao: $reviewer)"
-else
-  warn "PRD sem revisor: em repositorio privado fora do Enterprise a regra nao existe"
-  gh api -X PUT "repos/$repo/environments/PRD" --silent
-fi
 
 step "permissao do GITHUB_TOKEN para criar PR (back-merge, GitOps)"
 gh api -X PUT "repos/$repo/actions/permissions/workflow" \

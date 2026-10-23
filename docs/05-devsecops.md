@@ -56,6 +56,16 @@ flowchart LR
 - **produção recebe o digest**, não a tag. A promoção `RC → X.Y.Z` confere que o
   digest não mudou.
 
+**Repositório privado sem Enterprise Cloud.** Attestations não existem nesse
+cenário, e o build falharia. `security-config.yml` → `provenance: {attest: false,
+verify: false}` desliga a etapa. O deploy passa a conferir só o digest e a origem
+declarada na imagem (`org.opencontainers.image.source`), e escreve um aviso no
+log. A garantia cai muito: qualquer um com push no registry pode declarar essa
+origem. As compensações possíveis:
+- registry com push restrito ao token da esteira;
+- verificação de assinatura no cluster;
+- o plano Enterprise.
+
 Com a plataforma num repositório separado (o `signer-workflow` fica fora do
 alcance do time da aplicação), isso corresponde a **SLSA Build L3**. Em
 repositório **privado**, attestations exigem GitHub Enterprise Cloud.

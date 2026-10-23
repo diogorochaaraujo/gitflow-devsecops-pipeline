@@ -10,7 +10,8 @@ on:
     # branches de estado do GitOps e de PR de deploy nao sao codigo
     branches-ignore: [environments, "deploy/**"]
   pull_request:
-    types: [opened, reopened, synchronize, labeled, unlabeled, closed]
+    # edited: corrigir titulo/corpo (ex.: o chamado do changeRef) reavalia sem push vazio
+    types: [opened, reopened, edited, synchronize, labeled, unlabeled, closed]
 
 concurrency:
   # um push novo cancela a verificacao anterior da mesma branch/PR;

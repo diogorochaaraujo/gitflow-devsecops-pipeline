@@ -33,7 +33,7 @@ case "${ACTOR:-}" in *"[bot]") bot=true ;; esac
 stage=none build=false stamp=false pre="" promote=false post="" backmerge=false
 
 pr_open=false
-case "${PR_ACTION:-}" in opened|reopened|synchronize|labeled|unlabeled) pr_open=true ;; esac
+case "${PR_ACTION:-}" in opened|reopened|edited|synchronize|labeled|unlabeled) pr_open=true ;; esac
 
 case "$model:$EVENT" in
   gitflow:push)

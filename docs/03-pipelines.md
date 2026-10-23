@@ -19,7 +19,7 @@ flowchart LR
 
 | Job | Faz | Falha quando |
 |---|---|---|
-| **Resolve** | valida `pipeline.yml` e `deploy-config.yml` contra o schema; roteia o evento; no PR de release, confere branch em dia e label; calcula a versão | config inválida, branch atrás da base, label ausente ou duplicado |
+| **Resolve** | valida `pipeline.yml` e `deploy-config.yml` contra o schema; roteia o evento; no PR de release, confere branch em dia, label e chamado (`changeRef`); recusa migração publicada alterada; calcula a versão | config inválida, branch atrás da base, label ausente ou duplicado, PR sem chamado, migração editada |
 | **Security** | gitleaks no histórico, semgrep, trivy (dependências e IaC), em paralelo | achado acima do gate |
 | **Build** | módulo da stack (deps com cache, lint, **testes**), imagem com SBOM e proveniência, **attestation** assinada, scan da imagem por digest | teste, build ou CVE acima do gate |
 | **Gate** | agrega: verde só se todo estágio exigido nesta execução passou. **É o check obrigatório dos rulesets** (`Pipeline / Gate`) | qualquer estágio exigido falhou |
@@ -38,7 +38,8 @@ flowchart LR
    e histórico do ambiente) e `concurrency` por ambiente (dois deploys no mesmo
    ambiente nunca se cruzam).
 3. Em cada job:
-   - **Verify Artifact**: resolve o digest e roda `gh attestation verify
+   - checkout da aplicação, para ler `config/` e as migrações;
+   - **Verify Artifact** (exceto no `flyway`): resolve o digest e roda `gh attestation verify
      --signer-workflow <plataforma>/stage-build.yml`. Imagem construída fora da
      plataforma **não é implantada**;
    - **driver** do ambiente:
@@ -48,6 +49,7 @@ flowchart LR
 | `kubernetes` | acesso ao cluster (`kind` efêmero, `aks` por OIDC, ou `kubeconfig` do Environment), `kubectl apply`, `rollout status`, **rollback automático** em cluster persistente, smoke test pela versão do `/health` | no cluster |
 | `gitops-pr` | renderiza o manifesto **com o digest** e grava em `envs/<env>/` da branch de estado: `mode: pr` abre PR (o merge **é** o deploy), `mode: commit` grava direto | só no git; o Argo CD/Flux aplica |
 | `ecs` | assume o papel do grupo por OIDC, nova task definition, `update-service`, espera estabilizar | na conta AWS |
+| `flyway` | `flyway migrate` no banco do ambiente, ou validação num Postgres descartável (`ephemeral`) | no banco |
 
    - **DAST** (ZAP baseline) contra o serviço entregue, quando o driver alcança
      o serviço (`kubernetes`).
@@ -57,6 +59,17 @@ flowchart LR
 `redeploy.yml` (manual): `deploy` de uma versão existente (rollback),
 `diff`, `destroy`. Usa o mesmo `stage-deploy`, então passa pela mesma
 verificação de attestation e pela mesma aprovação de Environment.
+
+**A versão vai com a configuração dela.** Sem `ref` explícito, o *Prepare Deploy*
+lê o commit gravado na imagem (`org.opencontainers.image.revision`) e usa o
+`deploy-config.yml`, o `config/` e as migrações **daquele commit**. Um rollback
+para a `1.4.0` entrega o código, a configuração e o esquema da `1.4.0`, e não o
+código antigo com a configuração do HEAD.
+
+Consequência para a plataforma: **o contrato só evolui de forma compatível.** Um
+rollback lê um `deploy-config.yml` antigo com os scripts atuais. Um campo novo
+precisa ter padrão, e um campo removido precisa continuar sendo aceito (e
+ignorado) por algumas versões.
 
 ## Report
 

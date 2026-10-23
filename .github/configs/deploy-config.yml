@@ -1,15 +1,22 @@
 # Onde e como cada artefato roda em cada ambiente.
-# Valor efetivo = defaults -> envs.<ENV> (driver e ajustes) e
-#                 artifacts.<a> -> envs.<ENV>.artifacts.<a> (merge profundo).
+#   settings efetivos = defaults <- envs.<ENV>                      (driver, acesso)
+#   artefato efetivo  = artifacts.<a> <- envs.<ENV>.artifacts.<a>   (merge profundo)
+#   driver            = artefato (no ambiente) > envs.<ENV> > defaults
+#   ordem no ambiente = artifacts.<a>.order (menor primeiro; padrao 100)
 # Validado contra schemas/deploy-config.schema.json. Referencia: docs/04-config-as-code.md.
 defaults:
-  driver: kubernetes          # kubernetes | gitops-pr | ecs
+  driver: kubernetes          # kubernetes | gitops-pr | ecs | flyway
   kubernetes:
     cluster: kind             # kind (efemero, laboratorio) | aks | kubeconfig
   gitops:
     repository: ""            # vazio = este repositorio
     branch: environments      # branch de estado dos ambientes (lida pelo Argo CD/Flux)
     mode: pr                  # pr (merge = deploy) | commit (direto, so nao produtivo)
+  flyway:
+    # laboratorio: sem DB_URL no Environment, valida as migracoes num Postgres
+    # descartavel. Em ambiente real: segredos DB_URL, DB_USER, DB_PASSWORD no
+    # Environment e ephemeral: false (ou omitido).
+    ephemeral: true
 
 # Grupo de contas/clusters de cada ambiente. Ambientes nao produtivos dividem a
 # infraestrutura; PRD e isolado. Credencial por grupo: AWS_ROLE_ARN_<GRUPO>,
@@ -21,12 +28,24 @@ accounts:
   PRD: PRD
 
 artifacts:
+  # migracoes do banco: rodam antes da aplicacao em cada ambiente
+  web-api-db:
+    driver: flyway
+    order: 10
+    flyway:
+      database: postgresql
+      locations: db/migrations
+      schema: public
+
   web-api:
     containerPort: 8080
     healthPath: /health
     replicas: 1
     cpu: 256
     memory: 512
+    rolloutTimeout: 180
+    # configuracao de runtime: config/web-api/<env>.env (CHAVE=VALOR) vira ConfigMap.
+    # segredos: secrets: [NOME] vira ExternalSecret (exige kubernetes.secretStore)
 
 envs:
   DSV:
@@ -38,8 +57,11 @@ envs:
       web-api:
         replicas: 2
   PRD:
-    # producao entregue por GitOps: o pipeline abre PR na branch de estado; o
-    # merge e o deploy, e quem aplica no cluster e o agente (Argo CD/Flux)
+    # quem aprova (aplicado pelo bootstrap, nao a cada execucao)
+    reviewers:
+      - user: diogorochaaraujo
+    # producao por GitOps: o pipeline abre PR na branch de estado; o merge e o
+    # deploy, e quem aplica no cluster e o agente (Argo CD/Flux)
     driver: gitops-pr
     artifacts:
       web-api:
