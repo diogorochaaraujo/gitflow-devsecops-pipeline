@@ -7,16 +7,21 @@
 # valem para todos os repositorios e o time da aplicacao nao consegue alterar.
 #
 # Ambientes, aprovadores e tempo de espera vem do deploy-config.yml
-# (envs.<ENV>.reviewers / waitTimer): a regra de quem aprova e versionada e
-# revisada por PR, e aplicada aqui -- nao a cada execucao do pipeline.
+# (envs.<ENV>.reviewers / waitTimer / preventSelfReview): a regra de quem aprova
+# e versionada e revisada por PR, e aplicada aqui -- nao a cada execucao do pipeline.
 #
-# uso: scripts/bootstrap-repo.sh <owner/repo> [deploy-config.yml]
+# Separacao de funcoes por padrao: o PR para a main exige MAIN_REVIEWS aprovacoes
+# (padrao 1) e quem disparou o deploy nao o aprova. Com uma pessoa so (laboratorio
+# solo): MAIN_REVIEWS=0 e envs.<ENV>.preventSelfReview: false.
+#
+# uso: [MAIN_REVIEWS=n] scripts/bootstrap-repo.sh <owner/repo> [deploy-config.yml]
 # requer: gh autenticado com permissao de admin no repositorio
 set -euo pipefail
 
 repo=${1:?uso: bootstrap-repo.sh <owner/repo> [deploy-config.yml]}
 config=${2:-.github/configs/deploy-config.yml}
 integration=${INTEGRATION_BRANCH:-dsv}
+main_reviews=${MAIN_REVIEWS:-1}
 
 step() { printf '\n== %s\n' "$*"; }
 warn() { printf 'AVISO: %s\n' "$*" >&2; }
@@ -53,6 +58,8 @@ envs=$(yq -o=json '[((.accounts // {}) | keys), ((.envs // {}) | keys)] | flatte
 for env in $envs; do
   reviewers=$(yq -o=json -I=0 ".envs.$env.reviewers // []" "$config")
   wait_min=$(yq ".envs.$env.waitTimer // 0" "$config")
+  # `// true` trataria o false explicito como ausente
+  self=$(yq ".envs.$env.preventSelfReview" "$config"); [ "$self" = false ] || self=true
   ids='[]'
   for row in $(jq -c '.[]' <<<"$reviewers"); do
     if user=$(jq -er '.user // empty' <<<"$row"); then
@@ -61,10 +68,10 @@ for env in $envs; do
       id=$(gh api "orgs/${team%%/*}/teams/${team#*/}" --jq .id); ids=$(jq -c --argjson id "$id" '. + [{"type":"Team","id":$id}]' <<<"$ids")
     fi
   done
-  body=$(jq -nc --argjson r "$ids" --argjson w "$wait_min" \
-    'if ($r | length) > 0 then {reviewers: $r, wait_timer: $w, prevent_self_review: false} else {wait_timer: $w} end')
+  body=$(jq -nc --argjson r "$ids" --argjson w "$wait_min" --argjson s "$self" \
+    'if ($r | length) > 0 then {reviewers: $r, wait_timer: $w, prevent_self_review: $s} else {wait_timer: $w} end')
   if gh api -X PUT "repos/$repo/environments/$env" --input - --silent <<<"$body"; then
-    echo "$env: $(jq -r '[.[] | (.user // .team)] | if length > 0 then "aprovacao: " + join(", ") else "sem aprovacao" end' <<<"$reviewers")$([ "$wait_min" -gt 0 ] && echo ", espera ${wait_min}min")"
+    echo "$env: $(jq -r '[.[] | (.user // .team)] | if length > 0 then "aprovacao: " + join(", ") else "sem aprovacao" end' <<<"$reviewers")$([ "$wait_min" -gt 0 ] && echo ", espera ${wait_min}min")$([ "$reviewers" != "[]" ] && [ "$self" = true ] && echo ", sem autoaprovacao")"
   else
     warn "$env: regra de aprovacao nao aplicada (repositorio privado fora do Enterprise?)"
     gh api -X PUT "repos/$repo/environments/$env" --silent
@@ -76,7 +83,7 @@ gh api -X PUT "repos/$repo/actions/permissions/workflow" \
   -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true --silent
 echo "ok"
 
-step "regras"
+step "regras (PR para a main: $main_reviews aprovacao(oes))"
 upsert_ruleset '{
   "name": "main-protection",
   "target": "branch",
@@ -86,7 +93,7 @@ upsert_ruleset '{
     {"type": "deletion"},
     {"type": "non_fast_forward"},
     {"type": "pull_request", "parameters": {
-      "required_approving_review_count": 0,
+      "required_approving_review_count": '"$main_reviews"',
       "dismiss_stale_reviews_on_push": true,
       "require_code_owner_review": false,
       "require_last_push_approval": false,

@@ -7,20 +7,41 @@ gates. Uns 40 minutos, quase todos esperando runner.
 
 - `gh` autenticado na sua conta (`gh auth status`);
 - repositório **público**: numa conta gratuita, revisor de Environment, rulesets
-  e attestations só funcionam em repositório público.
+  e attestations só funcionam em repositório público;
+- de preferência, **uma segunda conta** com acesso de escrita, para fazer o papel
+  de revisor e aprovador. Sem ela, veja *sozinho* abaixo.
 
 ## 1. Criar e preparar
+
+Ajuste antes do primeiro push:
+
+1. **Aprovadores**: em `.github/configs/deploy-config.yml`, troque os usuários
+   de `envs.PRD.reviewers` pelos seus.
+2. **Plataforma** (`uses:` em `ci-cd.yml`, `redeploy.yml` e `housekeeping.yml`),
+   uma de duas opções:
+   - **consumir a deste repositório**: não mude nada. É a separação de verdade
+     entre plataforma e aplicação, e as attestations saem assinadas pelo
+     workflow daqui;
+   - **publicar a sua**: troque `diogorochaaraujo/gitflow-devsecops-pipeline`
+     pelo seu repositório nos três `uses:` e publique a tag junto
+     (`git push origin v1.0.0`). O SHA é o mesmo, porque o histórico veio no
+     clone.
 
 ```bash
 gh repo create <voce>/gitflow-devsecops-pipeline --public --source . --push
 scripts/bootstrap-repo.sh <voce>/gitflow-devsecops-pipeline
 ```
 
-O bootstrap cria a `dsv`, os labels, os Environments (com os revisores de
-`envs.<ENV>.reviewers` do `deploy-config.yml`),
-as regras da `main` (PR, merge commit, `Pipeline / Gate` verde, branch em dia) e
-das tags (imutáveis). A criação da `dsv` já dispara o primeiro **snapshot com
-deploy em DSV**.
+O bootstrap cria a `dsv`, os labels, os Environments (com os aprovadores de
+`envs.<ENV>.reviewers` e, por padrão, **sem autoaprovação**), as regras da
+`main` (PR com 1 aprovação, merge commit, `Pipeline / Gate` verde, branch em
+dia) e das tags (imutáveis). A criação da `dsv` já dispara o primeiro
+**snapshot com deploy em DSV**.
+
+> **Sozinho**, sem segunda conta: `envs.PRD.preventSelfReview: false` no
+> `deploy-config.yml` e `MAIN_REVIEWS=0 scripts/bootstrap-repo.sh ...`. O fluxo
+> roda igual, mas a separação de funções, que é o ponto do controle, deixa de
+> ser demonstrada.
 
 ## 2. Tarefa: snapshot sem deploy
 
@@ -73,15 +94,17 @@ O label redispara (`types: labeled`). Agora: gates, *Gate* verde, *Stamp*
 ## 5. Merge e produção por GitOps
 
 ```bash
-gh pr merge --merge
+gh pr merge --merge     # depois da aprovação do PR pela segunda conta
 ```
 
 **Observe:**
 
 1. *Promote* cria `0.1.0` com o **mesmo digest** da RC (`Mesmo digest:
    sha256:...`), a tag git e a GitHub Release;
-2. *Deploy release → PRD* espera **aprovação**. Aprove em *Review deployments*;
-   é **uma** aprovação para o ambiente inteiro (banco e API entram no mesmo job);
+2. *Deploy release → PRD* espera **aprovação**. Aprove em *Review deployments*
+   **com a outra conta**: quem fez o merge disparou a execução e não pode aprovar
+   o próprio deploy. É **uma** aprovação para o ambiente inteiro (banco e API
+   entram no mesmo job);
 3. `web-api-db` aplica as migrações (no lab, validação efêmera); depois o driver
    `gitops-pr` verifica a attestation de `web-api` e abre um PR para a branch
    `environments` com `envs/prd/web-api.yaml` apontando para
@@ -121,8 +144,14 @@ pede aprovação para PRD.
 > O roteamento do trunk é coberto por teste (`scripts/tests/run.sh`), mas o fluxo
 > ainda não rodou de ponta a ponta num repositório real.
 
-## 8. Separar a plataforma
+## 8. Atualizar e separar a plataforma
 
-[01 · Arquitetura → Separando as camadas](01-arquitetura.md#separando-as-camadas).
-É o passo que dá às attestations o nível SLSA L3 e permite proteger a esteira
-do time da aplicação.
+- **Atualizar a versão**: [10 · Neste repositório](10-plataforma.md#neste-repositório)
+  (o PR que move o pino é o piloto).
+- **Separar em dois repositórios**: [01 · Separando as camadas](01-arquitetura.md#separando-as-camadas).
+  É o passo que dá às attestations o nível SLSA L3 e permite proteger a esteira
+  do time da aplicação.
+
+---
+
+[← 05 · DevSecOps](05-devsecops.md) · [índice](../README.md#comece-por-aqui) · [07 · Lições →](07-melhorias.md)

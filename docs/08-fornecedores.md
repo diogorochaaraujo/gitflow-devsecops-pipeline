@@ -55,6 +55,14 @@ flowchart TB
 | Audit por execução (inclui aprovações) | 4 | `stage-report.yml` |
 | aprovações pendentes em issue | 2, sem entrega perdida | `ops-pending-approvals.yml` |
 
+> **Limite conhecido: o `GITHUB_TOKEN` que abre PR também aprova PR.** No
+> GitHub, a mesma opção (*Allow GitHub Actions to create and approve pull
+> requests*) libera as duas coisas. O lab precisa dela para o back-merge e o PR
+> de estado do GitOps, e com ela um workflow poderia aprovar um PR e contar como
+> revisão. O ruleset de push, que impede o fornecedor de alterar workflows,
+> fecha o caminho. Numa organização, o certo é abrir esses PRs com o token de
+> uma **GitHub App** da plataforma e deixar a opção desligada.
+
 Aplicar tudo na organização, primeiro em simulação:
 
 ```bash
@@ -148,3 +156,7 @@ de cada gate e **quem aprovou cada ambiente**. Agregados por propriedade
 O histórico de status de deployment na API do GitHub é apagado depois de 90
 dias. Para retenção longa, exporte o `audit.json` para um bucket com bloqueio
 de escrita (WORM) ou ligue o streaming do audit log (Enterprise).
+
+---
+
+[← 07 · Lições](07-melhorias.md) · [índice](../README.md#comece-por-aqui) · [09 · Extensão →](09-extensao.md)

@@ -9,8 +9,8 @@ authors:
 repository-code: "https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline"
 url: "https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline"
 license: Apache-2.0
-version: 0.2.1
-date-released: 2026-10-23
+# sem version/date-released: citam a tag de release usada, e o arquivo nao
+# fica desatualizado a cada versao
 keywords:
   - github-actions
   - devsecops

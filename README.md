@@ -9,41 +9,19 @@ de plataforma, DevOps e DevSecOps.
 
 Template **modular** de esteira em GitHub Actions para organizações que
 precisam controlar *como* o código chega à produção, inclusive quando quem
-escreve o código são **vários fornecedores**.
+escreve o código são **vários fornecedores**. O repositório da aplicação tem
+um workflow de poucas linhas, que o fornecedor não edita. Toda a lógica mora
+numa plataforma versionada, consumida por SHA.
 
-- **Um workflow por repositório de aplicação**, que o fornecedor não edita. Toda
-  a lógica mora numa camada de plataforma versionada.
-- **Fluxo escolhido por configuração**: `gitflow` (integração → PR de release com
-  label) ou `trunk` (main + Conventional Commits).
-- **Módulos plugáveis**: build por stack (`node`, `python`, `java`, `container`) e
-  deploy por driver (`kubernetes`, `gitops-pr`, `ecs`, `flyway`), escolhido por
-  artefato.
-- **Gates de segurança** (segredos, SAST, SCA, IaC, imagem, DAST) e um contrato
-  com **schema**, para que erro de configuração falhe em segundos.
-- **Prova de origem**: toda imagem sai com SBOM e attestation assinada, e
-  nenhum deploy aceita imagem que não tenha sido construída pela plataforma.
-- **Promoção do mesmo digest** de DSV até PRD, sem rebuild.
-- **Vários artefatos por repositório**, cada um com seu driver e sua ordem. No
-  lab, as migrações do banco (Flyway) rodam antes da API em todo ambiente, e
-  migração já publicada não pode ser editada.
-- **Configuração por ambiente** em `config/<artefato>/<env>.env` e **segredos só
-  por nome**, resolvidos no cofre do cluster: o pipeline nunca vê o valor.
-- **Quem aprova cada ambiente, como código** (`envs.<ENV>.reviewers`), **uma
-  aprovação por ambiente**, e release amarrada a um chamado (`flow.changeRef`).
-- **Política de promoção**: PRD só aceita release publicada, HMG só candidata ou
-  release, e isso vale também para o redeploy manual, antes de qualquer aprovação.
-- **Governança como código** para a organização: regras, política de Actions,
-  OIDC preso ao workflow, entrada e saída de fornecedor.
-
-Roda ponta a ponta numa conta gratuita: o laboratório faz deploy num cluster
-`kind` efêmero e entrega produção por **GitOps** (PR numa branch de estado).
+Roda ponta a ponta numa conta gratuita: deploy num cluster `kind` efêmero e
+produção entregue por **GitOps** (PR numa branch de estado).
 
 ```mermaid
 flowchart LR
   subgraph APP["repo da aplicação (fornecedor)"]
     W["ci-cd.yml<br/>(protegido)"] --- C["pipeline.yml<br/>deploy-config.yml"]
   end
-  subgraph PLAT["plataforma (cliente)"]
+  subgraph PLAT["plataforma (cliente) · vX.Y.Z"]
     O["platform.yml<br/>resolve → gates → release → deploy"]
     M["módulos<br/>build-node · build-python · build-java · build-container<br/>deploy-kubernetes · deploy-gitops-pr · deploy-ecs · deploy-flyway"]
     O --> M
@@ -57,31 +35,62 @@ flowchart LR
   O -->|kubectl / PR de estado| K8S[(Kubernetes)]
 ```
 
-## Por onde começar
+## O que ele garante
 
-| Quero... | Leia |
+| Tema | Como |
 |---|---|
-| **ver o fluxo inteiro numa página: etapas E0–E12, quem age, o que bloqueia** | [00 · Mapa do processo](docs/00-mapa-do-processo.md) |
-| entender as camadas e o contrato entre elas | [01 · Arquitetura](docs/01-arquitetura.md) |
-| escolher entre gitflow e trunk; versões e tags | [02 · Fluxos](docs/02-fluxos.md) |
-| ver o que roda em cada evento, job a job | [03 · Pipelines](docs/03-pipelines.md) |
-| configurar uma aplicação (`pipeline.yml`, `deploy-config.yml`) | [04 · Config as code e GitOps](docs/04-config-as-code.md) |
-| entender os gates, as attestations e a cadeia de suprimentos | [05 · DevSecOps](docs/05-devsecops.md) |
-| rodar o laboratório do zero | [06 · Laboratório](docs/06-laboratorio.md) |
-| as lições do modelo de referência | [07 · Melhorias](docs/07-melhorias.md) |
-| **controlar vários fornecedores na mesma organização** | [08 · Fornecedores](docs/08-fornecedores.md) |
-| criar uma stack, um driver ou um fluxo novo | [09 · Extensão](docs/09-extensao.md) |
-| evoluir a própria esteira sem quebrar as aplicações | [10 · Plataforma](docs/10-plataforma.md) |
+| **Fluxo previsível** | `gitflow` (integração → PR de release com label) ou `trunk` (Conventional Commits), escolhido por configuração. Etapas numeradas **E0–E12**, e cada execução diz em qual está |
+| **Erro barato** | schema no contrato e validação do PR (label, chamado, branch em dia, migração imutável): erro de configuração e de processo falha em segundos |
+| **Segurança no caminho** | segredos, SAST, SCA, IaC, imagem e DAST, com os mesmos gates no snapshot e na release; exceção só com prazo |
+| **Prova de origem** | toda imagem sai com SBOM e attestation; nenhum deploy aceita imagem que a plataforma não construiu; o mesmo digest vai de DSV a PRD |
+| **Produção sob controle** | política de promoção (PRD só aceita release publicada), uma aprovação por ambiente, quem disparou não aprova, aprovadores como código |
+| **Entrega modular** | build por stack (`node`, `python`, `java`, `container`) e deploy por driver (`kubernetes`, `gitops-pr`, `ecs`, `flyway`), por artefato; banco antes da API |
+| **Configuração e segredos** | `config/<artefato>/<env>.env` por ambiente; segredos só por nome, resolvidos no cofre do cluster |
+| **Vários fornecedores** | rulesets, política de Actions, OIDC preso ao workflow, entrada e saída de fornecedor por script |
+| **Evidência** | `audit.json` por execução (jobs, aprovações, versão da plataforma) e análise de erro classificada, com o que fazer |
+
+## Comece por aqui
+
+| Se você quer... | Leia, nesta ordem |
+|---|---|
+| **entender o fluxo** | [00 · Mapa do processo](docs/00-mapa-do-processo.md) → [02 · Fluxos](docs/02-fluxos.md) → [01 · Arquitetura](docs/01-arquitetura.md) |
+| **rodar o laboratório** | [06 · Laboratório](docs/06-laboratorio.md), consultando [04 · Config as code](docs/04-config-as-code.md) |
+| **avaliar a segurança** | [05 · DevSecOps](docs/05-devsecops.md) → [08 · Fornecedores](docs/08-fornecedores.md) |
+| **adotar numa organização** | [08 · Fornecedores](docs/08-fornecedores.md) → [10 · Plataforma](docs/10-plataforma.md) → [07 · Lições](docs/07-melhorias.md) |
+| **estender** (stack, driver, fluxo) | [09 · Extensão](docs/09-extensao.md), com [03 · Pipelines](docs/03-pipelines.md) como referência |
+
+<details>
+<summary>Todos os documentos</summary>
+
+| | Documento | Conteúdo |
+|---|---|---|
+| 00 | [Mapa do processo](docs/00-mapa-do-processo.md) | o fluxo numa página: etapas, papéis, o que bloqueia, falhou → volte para |
+| 01 | [Arquitetura](docs/01-arquitetura.md) | camadas, topologia de ambientes, plataforma × aplicação |
+| 02 | [Fluxos](docs/02-fluxos.md) | gitflow, trunk, o que cada evento faz, versões e tags |
+| 03 | [Pipelines](docs/03-pipelines.md) | cada job, o deploy por dentro, redeploy, report, housekeeping |
+| 04 | [Config as code e GitOps](docs/04-config-as-code.md) | `pipeline.yml`, `deploy-config.yml`, branch de estado |
+| 05 | [DevSecOps](docs/05-devsecops.md) | gates, exceções, attestations, cadeia de suprimentos, OIDC |
+| 06 | [Laboratório](docs/06-laboratorio.md) | do repositório vazio a PRD, e experimentos que quebram de propósito |
+| 07 | [Lições](docs/07-melhorias.md) | padrões de falha de uma esteira corporativa real e a resposta de cada um |
+| 08 | [Fornecedores](docs/08-fornecedores.md) | controles por camada, plano do GitHub, acesso, evidência |
+| 09 | [Extensão](docs/09-extensao.md) | stack, driver, fluxo, regra de erro ou ferramenta nova |
+| 10 | [Plataforma](docs/10-plataforma.md) | como a esteira evolui sem quebrar as aplicações |
+
+</details>
 
 ## Mapa do repositório
 
 | Camada | Caminho | Dono |
 |---|---|---|
-| **Aplicação** | `app/`, `pipeline.yml`, `.github/configs/`, `.trivyignore.yaml`, `.github/workflows/{ci-cd,redeploy,housekeeping}.yml` | time da aplicação / fornecedor (os workflows, protegidos) |
+| **Aplicação** | `app/`, `db/`, `config/`, `pipeline.yml`, `.github/configs/`, `.github/workflows/{ci-cd,redeploy,housekeeping}.yml` | time da aplicação / fornecedor (os workflows, protegidos) |
 | **Plataforma: orquestrador e estágios** | `.github/workflows/platform.yml`, `stage-*.yml`, `ops-*.yml` | time de plataforma |
 | **Plataforma: módulos** | `.github/actions/*`, `scripts/`, `templates/`, `schemas/` | time de plataforma |
 | **Governança** | `governance/`, `scripts/governance/` | administração da organização |
 | **Exemplos** | `examples/` (Node + trunk + GitOps, Java + gitflow + AKS, Python + gitflow + ECS) | — |
+
+Aqui as duas camadas dividem o repositório, mas já se comportam como
+separadas: a aplicação chama a plataforma pela tag `v1.0.0`, **pinada por
+SHA**, e não pelo código da própria branch ([10 · Plataforma](docs/10-plataforma.md#neste-repositório)).
 
 ## Estado de validação
 
@@ -90,21 +99,25 @@ flowchart LR
 | fluxo `gitflow` completo: snapshot → DSV → candidata em HMG → promoção com o mesmo digest → PRD por GitOps → back-merge | fluxo `trunk` (roteamento coberto por teste) |
 | recusas em segundos: label, chamado, migração publicada editada | driver `ecs`, cluster `aks` e `kubeconfig` |
 | attestation no build e **recusa** de imagem sem prova de origem | agente GitOps aplicando a branch de estado (Argo CD/Flux) |
-| Flyway (banco efêmero) antes da API; ConfigMap por ambiente | External Secrets num cluster real |
-| rollback com a configuração da própria versão | governança de organização (`apply-org.sh` só em simulação) |
-| aprovação de PRD, análise de erros classificada, Housekeeping | separação real plataforma × aplicação em dois repositórios |
+| política de promoção: snapshot recusado em PRD antes de pedir aprovação | External Secrets num cluster real |
+| Flyway (banco efêmero) antes da API; ConfigMap por ambiente | governança de organização (`apply-org.sh` só em simulação) |
+| rollback com a configuração da própria versão | plataforma e aplicação em **dois** repositórios |
+| plataforma pinada por SHA (`v1.0.0`), com a versão registrada no Audit | aprovação de PRD por uma **segunda pessoa** (*prevent self-review* configurado; até aqui, um aprovador) |
+| aprovação de PRD, análise de erros classificada, Housekeeping | |
 
 ## Validação local
 
-Em Docker, sem instalar nada:
+Tudo em Docker, sem instalar nada, com as mesmas imagens do Platform CI:
 
 ```bash
-scripts/tests/run.sh                                  # 64 testes: versão, roteamento, matriz, manifesto, migrações, classificação de erro
-scripts/validate-config.sh .                          # pipeline.yml e deploy-config.yml contra o schema
+scripts/tests/run.sh               # 82 testes: versão, roteamento, política, matriz, manifesto, migrações, erros
+scripts/validate-config.sh .       # pipeline.yml e deploy-config.yml contra o schema
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/zizmorcore/zizmor:1.30.1 --offline .github/
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh scripts/governance/*.sh scripts/tests/*.sh
 ```
+
+Os digests de cada imagem estão em [`platform-ci.yml`](.github/workflows/platform-ci.yml).
 
 ## Autoria, licença e como dar crédito
 

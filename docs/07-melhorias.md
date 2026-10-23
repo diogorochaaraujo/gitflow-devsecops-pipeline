@@ -18,17 +18,17 @@ uma decisão aqui.
 | 7 | **Deploy em DSV a partir de qualquer branch**, inclusive de bots | uma tarefa sobrescrevia a outra no ambiente compartilhado | só a branch de integração faz deploy; bot só testa |
 | 8 | PRs de **bot falhavam** por falta de segredos | ruído constante no histórico | o resolver reconhece bot: testa e analisa, sem publicar |
 | 9 | Stack de IaC presa em estado de **rollback incompleto** travava os deploys seguintes até intervenção manual | ambiente parado por dias | rollback automático no driver; GitOps tira o pipeline do caminho |
-| 10 | **Workflows centrais em `@main`**, sem versão | uma mudança na plataforma atinge todos os repositórios no mesmo instante | plataforma com tags imutáveis; aplicação pina por SHA com quarentena |
+| 10 | **Workflows centrais em `@main`**, sem versão | uma mudança na plataforma atinge todos os repositórios no mesmo instante | plataforma com tags imutáveis (`vX.Y.Z`); aplicação pina por SHA com quarentena |
 | 11 | **`secrets: inherit`** em todo repositório | o template central recebe todos os segredos de todos os repositórios | nenhum `inherit`; segredos de deploy por Environment; OIDC |
 | 12 | A cada execução, o pipeline **reconfigurava o repositório** (times, ambientes, regras) | latência e falhas que nada têm a ver com o código | governança aplicada uma vez, por script idempotente, no nível da organização |
 | 13 | A **análise de erro com IA** era útil em erro determinístico, genérica em achado de segurança, e frequentemente terminava em "consulte o time de plataforma" | o diagnóstico não virava ação | classificação determinística por regras versionadas, com "o que fazer" por classe |
 | 14 | **Sem prova de origem** da imagem: o deploy confiava na tag | qualquer imagem com a tag certa no registry seria implantada | attestation no build, verificação no deploy, digest em produção |
 | 15 | **Diff de IaC desligado** por padrão | mudança de infraestrutura entrava sem pré-visualização | `redeploy diff`; em GitOps o diff é o próprio PR |
 | 16 | Rótulo de release **major usado na maioria das releases** | versão perde significado (todo release "quebra compatibilidade") | opção `versioning: conventional`: a versão sai do que mudou |
-| 17 | **Testes e análise de qualidade opcionais no snapshot**, obrigatórios só na release | a release vira o primeiro contato com o gate, e a maioria das candidatas é reprovada | testes obrigatórios em todo build; gates iguais no snapshot | ✅ |
-| 18 | **Validação da aprovação da mudança no fim da release**, depois do merge | a `main` já tem o código quando a mudança é recusada | chamado exigido no PR de release (`changeRef`), antes do merge | ✅ formato; consulta ao sistema como extensão ([10](10-plataforma.md)) |
-| 19 | **Redeploy de produção conferido num serviço externo** de histórico | dependência de um sistema a mais para uma regra simples | política de promoção a partir das tags imutáveis (`check-deploy-policy.sh`) | ✅ |
-| 20 | **Evolução da esteira por fork em outra organização, consumida em `@main`** | isolamento bom no desenvolvimento, mas chegada simultânea a todos e rollback que atinge todos de novo | pré-release em pilotos, tag imutável, adoção por PR ([10](10-plataforma.md)) | ✅ documentado |
+| 17 | **Testes e análise de qualidade opcionais no snapshot**, obrigatórios só na release | a release vira o primeiro contato com o gate, e a maioria das candidatas é reprovada | testes obrigatórios em todo build; gates iguais no snapshot |
+| 18 | **Validação da aprovação da mudança no fim da release**, depois do merge | a `main` já tem o código quando a mudança é recusada | chamado exigido no PR de release (`changeRef`), antes do merge; a consulta ao sistema de mudanças fica como extensão ([10](10-plataforma.md)) |
+| 19 | **Redeploy de produção conferido num serviço externo** de histórico | dependência de um sistema a mais para uma regra simples | política de promoção a partir das tags imutáveis (`check-deploy-policy.sh`) |
+| 20 | **Evolução da esteira por fork em outra organização, consumida em `@main`** | isolamento bom no desenvolvimento, mas chegada simultânea a todos e rollback que atinge todos de novo | pré-release em pilotos, tag imutável, adoção por PR ([10](10-plataforma.md)); o lab consome a plataforma pinada por SHA |
 
 ## Para propor primeiro
 
@@ -44,3 +44,7 @@ por esforço:
    coisa sem risco para todo mundo ao mesmo tempo.
 4. **#6, aprovações pendentes.** Algumas horas de trabalho, e acaba a entrega
    perdida em silêncio.
+
+---
+
+[← 06 · Laboratório](06-laboratorio.md) · [índice](../README.md#comece-por-aqui) · [08 · Fornecedores →](08-fornecedores.md)

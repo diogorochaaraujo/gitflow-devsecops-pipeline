@@ -10,8 +10,8 @@ volta.
 | Papel | Faz | Nunca faz |
 |---|---|---|
 | **Dev** (time interno ou fornecedor) | branch, código, testes, PR, `pipeline.yml`, `deploy-config.yml`, `config/` | alterar workflows, gates ou exceções; aprovar o próprio PR; aprovar HMG/PRD |
-| **Revisor** (líder técnico do cliente, via CODEOWNERS) | revisa e aprova PRs para integração e `main` | — |
-| **Aprovador** (Environment HMG/PRD) | aprova "a versão X no ambiente Y" | — |
+| **Revisor** (líder técnico do cliente, via CODEOWNERS) | revisa e aprova PRs para integração e `main` | aprovar o próprio PR |
+| **Aprovador** (Environment HMG/PRD) | aprova "a versão X no ambiente Y" | aprovar um deploy que ele mesmo disparou (*prevent self-review*) |
 | **Esteira** (plataforma) | valida, constrói, analisa, versiona, entrega, audita | decidir sozinha ir para produção |
 | **Agente GitOps** (Argo CD/Flux, quando há) | aplica no cluster o estado mergeado | — |
 
@@ -124,3 +124,7 @@ fazer** (`scripts/error-hints.tsv`). Pela etapa:
 | fazer o fluxo inteiro na prática | [06 · Laboratório](06-laboratorio.md) |
 | controles para fornecedores | [08 · Fornecedores](08-fornecedores.md) |
 | como a própria esteira evolui | [10 · Plataforma](10-plataforma.md) |
+
+---
+
+[índice](../README.md#comece-por-aqui) · [01 · Arquitetura →](01-arquitetura.md)

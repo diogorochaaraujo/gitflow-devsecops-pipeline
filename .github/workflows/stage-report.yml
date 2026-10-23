@@ -44,6 +44,7 @@ jobs:
           RESULTS: ${{ inputs.results }}
           STAGE: ${{ inputs.stage }}
           VERSION: ${{ inputs.version }}
+          PLATFORM: ${{ inputs.platform-repository }}@${{ inputs.platform-ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
           approvals=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" \
@@ -52,9 +53,9 @@ jobs:
             --arg stage "$STAGE" --arg version "$VERSION" \
             --arg repository "$GITHUB_REPOSITORY" --arg ref "$GITHUB_REF" --arg sha "$GITHUB_SHA" \
             --arg actor "$GITHUB_ACTOR" --arg event "$GITHUB_EVENT_NAME" \
-            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg platform "$PLATFORM" \
             '{stage: $stage, version: $version, repository: $repository, ref: $ref, sha: $sha,
-              actor: $actor, event: $event, run_id: $run, attempt: $attempt,
+              actor: $actor, event: $event, run_id: $run, attempt: $attempt, platform: $platform,
               timestamp: (now | todate),
               jobs: ($needs | map_values(.result)),
               approvals: $approvals}' > audit.json

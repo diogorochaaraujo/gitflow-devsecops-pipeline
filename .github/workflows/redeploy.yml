@@ -30,7 +30,8 @@ permissions:
 jobs:
   redeploy:
     name: Redeploy
-    uses: ./.github/workflows/stage-deploy.yml
+    # mesma versao da plataforma do ci-cd.yml
+    uses: diogorochaaraujo/gitflow-devsecops-pipeline/.github/workflows/stage-deploy.yml@76e17043cc8c8f8390fd78c7b0565b2014b8604b # v1.0.0
     with:
       environments: ${{ inputs.environment }}
       version: ${{ inputs.version }}

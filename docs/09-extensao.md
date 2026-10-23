@@ -72,3 +72,7 @@ A primeira que casar vence, então regras específicas vão antes das genéricas
 | **artefato que não é imagem** (pacote zip, instalador, biblioteca) | stack nova `package`: gera o arquivo, publica como asset da GitHub Release (ou artefato OCI com `oras`) e atesta com `actions/attest-build-provenance` pelo `subject-path` |
 | **outros bancos no `flyway`** (Oracle, SQL Server) | `flyway.database` aceita novos valores; o driver troca o banco efêmero (ou exige `DB_URL`, porque nem todo banco tem imagem efêmera viável) |
 | **servidores de aplicação legados** (JBoss, IIS, WebLogic) | driver por tecnologia, mesmo contrato (`command`, `app`, `env`, `config`, `settings`), com credencial por Environment |
+
+---
+
+[← 08 · Fornecedores](08-fornecedores.md) · [índice](../README.md#comece-por-aqui) · [10 · Plataforma →](10-plataforma.md)
