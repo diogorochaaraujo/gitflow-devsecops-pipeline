@@ -106,6 +106,22 @@ check "chamado na branch" "0" "$(vp "release" "" "OPS-7-ajuste")"
 check "sem chamado recusado" "1" "$(vp "release" "sem referencia" dsv)"
 rm -rf "$pr"
 
+# ---------- metadado das composite actions (o actionlint nao valida) ----------
+for f in "$root"/.github/actions/*/action.yml; do
+  ok=$(yq -e '.name and .runs.using == "composite" and (.runs.steps | length > 0)' "$f" 2>/dev/null || echo erro)
+  check "action valida: ${f#"$root"/}" "true" "$ok"
+done
+
+# ---------- classify-error.sh ----------
+cls() { printf '%s\n' "$1" | "$s/classify-error.sh" | cut -f1; }
+check "classifica: action invalida e plataforma" "plataforma" "$(cls 'Failed to load /x/.platform/.github/actions/build-container/action.yml')"
+check "classifica: label" "processo" "$(cls 'O PR precisa de exatamente um label Release-Major')"
+check "classifica: chamado" "processo" "$(cls 'O PR de release precisa citar um chamado no titulo')"
+check "classifica: teste python" "build" "$(cls 'FAILED (failures=1)')"
+check "classifica: teste node" "build" "$(cls '3 failing')"
+check "classifica: migracao" "processo" "$(cls 'Migracao publicada em 1.0.0 foi alterada em db/migrations.')"
+check "classifica: desconhecido" "nao classificado" "$(cls 'algo totalmente novo')"
+
 echo
 echo "testes: $pass ok, $fail falharam"
 [ "$fail" -eq 0 ]

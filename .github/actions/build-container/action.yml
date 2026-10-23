@@ -18,7 +18,7 @@ inputs:
   cache-scope:
     required: true
   build-args:
-    description: CHAVE=VALOR, um por linha (sem segredo: ficam gravados na imagem)
+    description: "CHAVE=VALOR, um por linha (sem segredo: ficam gravados na imagem)"
     default: ""
   attest:
     description: registra attestation (exige repo publico ou Enterprise Cloud)
