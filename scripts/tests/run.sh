@@ -68,6 +68,22 @@ check "matriz: settings herdam defaults" "environments true" "$(jq -r '.include[
 check "matriz: reviewers/artifacts fora dos settings" "null null" "$(jq -r '.include[5].settings | "\(.reviewers) \(.artifacts)"' <<<"$m")"
 check "matriz vazia" '{"include":[]}' "$("$s/render-deploy-matrix.sh" "$root/.github/configs/deploy-config.yml" "")"
 
+be=$("$s/render-deploy-matrix.sh" --by-env "$root/.github/configs/deploy-config.yml" "DSV,PRD")
+check "por ambiente: um item por ambiente" "DSV PRD" "$(jq -r '[.include[].env] | join(" ")' <<<"$be")"
+check "por ambiente: artefatos em ordem" "web-api-db web-api" "$(jq -r '[.include[0].artifacts[].artifact] | join(" ")' <<<"$be")"
+check "por ambiente: drivers do ambiente" "flyway,gitops-pr" "$(jq -r '.include[1].drivers | join(",")' <<<"$be")"
+
+# ---------- deploy-gitops.sh: varios artefatos, um commit ----------
+gx=$(mktemp -d); git init -q --bare "$gx/state.git"; git clone -q "$gx/state.git" "$gx/w" 2>/dev/null
+( cd "$gx/w" && git config user.email t@t && git config user.name t
+  ENV_NAME=HMG VERSION=2.0.0 IMAGE='img@sha256:abc' STATE_BRANCH=environments MODE=commit TARGET_REPO=o/r GITHUB_RUN_ID=1 \
+  ARTIFACTS='[{"artifact":"api","config":{"containerPort":8080}},{"artifact":"worker","config":{"args":["run"]}}]' \
+  "$s/deploy-gitops.sh" deploy >/dev/null 2>&1 )
+check "gitops: os dois manifestos no estado" "api.yaml worker.yaml" "$(git --git-dir="$gx/state.git" ls-tree --name-only environments envs/hmg/ | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
+check "gitops: um unico commit de deploy" "deploy(hmg): 2.0.0 (api, worker)" "$(git --git-dir="$gx/state.git" log -1 --format=%s environments)"
+check "gitops: digest no manifesto" "img@sha256:abc" "$(git --git-dir="$gx/state.git" show environments:envs/hmg/api.yaml | yq 'select(.kind=="Deployment") | .spec.template.spec.containers[0].image')"
+rm -rf "$gx"
+
 # ---------- render-manifest.sh ----------
 mf() { "$s/render-manifest.sh"; }
 man=$(APP=web-api ENV_NAME=HMG VERSION=1.5.0-12 IMAGE='ghcr.io/o/web-api@sha256:abc' CONFIG_DIR="$root/config" \

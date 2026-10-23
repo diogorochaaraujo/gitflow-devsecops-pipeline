@@ -81,7 +81,7 @@ gh pr merge --merge
 1. *Promote* cria `0.1.0` com o **mesmo digest** da RC (`Mesmo digest:
    sha256:...`), a tag git e a GitHub Release;
 2. *Deploy release → PRD* espera **aprovação**. Aprove em *Review deployments*;
-   a aprovação vale para os dois artefatos do ambiente;
+   é **uma** aprovação para o ambiente inteiro (banco e API entram no mesmo job);
 3. `web-api-db` aplica as migrações (no lab, validação efêmera); depois o driver
    `gitops-pr` verifica a attestation de `web-api` e abre um PR para a branch
    `environments` com `envs/prd/web-api.yaml` apontando para

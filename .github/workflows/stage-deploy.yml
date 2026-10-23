@@ -93,7 +93,7 @@ jobs:
           ENVIRONMENTS: ${{ inputs.environments }}
           PLATFORM_REPO: ${{ inputs.platform-repository || github.repository }}
         run: |
-          matrix=$(.platform/scripts/render-deploy-matrix.sh .github/configs/deploy-config.yml "$ENVIRONMENTS")
+          matrix=$(.platform/scripts/render-deploy-matrix.sh --by-env .github/configs/deploy-config.yml "$ENVIRONMENTS")
           {
             echo "matrix=$matrix"
             echo "name=$(yq '.app.name' pipeline.yml)"
@@ -103,12 +103,15 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           jq . <<<"$matrix"
 
+  # UM job por ambiente = UMA aprovacao por ambiente. Dentro dele, os artefatos
+  # entram em ordem fixa por driver: banco (flyway) antes das aplicacoes; e,
+  # dentro de cada driver, por artifacts.<a>.order.
   deploy:
     name: ${{ matrix.env }} - ${{ inputs.version || inputs.command }}
     needs: prepare-deploy
     if: fromJSON(needs.prepare-deploy.outputs.matrix).include[0] != null
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: write
       pull-requests: write
@@ -122,8 +125,10 @@ jobs:
     environment:
       name: ${{ matrix.env }}
     concurrency:
-      group: deploy-${{ github.repository }}-${{ matrix.env }}-${{ matrix.artifact }}
+      group: deploy-${{ github.repository }}-${{ matrix.env }}
       cancel-in-progress: false
+    env:
+      ARTIFACTS: ${{ toJSON(matrix.artifacts) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -146,9 +151,12 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: echo "tag=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$NAME:$VERSION" >> "$GITHUB_OUTPUT"
 
+      # uma imagem por repositorio: verificada uma vez para todos os artefatos que a usam
       - id: verify
         name: Verify Artifact
-        if: inputs.command == 'deploy' && matrix.driver != 'flyway'
+        if: >-
+          inputs.command == 'deploy' && (contains(matrix.drivers, 'kubernetes')
+          || contains(matrix.drivers, 'gitops-pr') || contains(matrix.drivers, 'ecs'))
         uses: ./.platform/.github/actions/verify-artifact
         with:
           image: ${{ steps.image.outputs.tag }}
@@ -156,17 +164,42 @@ jobs:
           verify-attestation: ${{ fromJSON(needs.prepare-deploy.outputs.provenance).verify }}
           token: ${{ github.token }}
 
+      - name: Deploy (flyway)
+        if: contains(matrix.drivers, 'flyway')
+        uses: ./.platform/.github/actions/deploy-flyway
+        with:
+          command: ${{ inputs.command }}
+          artifacts: ${{ env.ARTIFACTS }}
+          env: ${{ matrix.env }}
+          settings: ${{ toJSON(matrix.settings) }}
+          app-dir: ${{ github.workspace }}/.app
+          db-url: ${{ secrets.DB_URL }}
+          db-user: ${{ secrets.DB_USER }}
+          db-password: ${{ secrets.DB_PASSWORD }}
+
+      - name: Deploy (ecs)
+        if: contains(matrix.drivers, 'ecs')
+        uses: ./.platform/.github/actions/deploy-ecs
+        with:
+          command: ${{ inputs.command }}
+          artifacts: ${{ env.ARTIFACTS }}
+          env: ${{ matrix.env }}
+          version: ${{ inputs.version }}
+          image: ${{ steps.verify.outputs.ref }}
+          settings: ${{ toJSON(matrix.settings) }}
+          role-arn: ${{ vars[format('AWS_ROLE_ARN_{0}', matrix.account)] }}
+          region: ${{ vars.AWS_REGION }}
+
       - name: Deploy (kubernetes)
-        if: matrix.driver == 'kubernetes'
+        if: contains(matrix.drivers, 'kubernetes')
         uses: ./.platform/.github/actions/deploy-kubernetes
         with:
           command: ${{ inputs.command }}
-          app: ${{ matrix.artifact }}
+          artifacts: ${{ env.ARTIFACTS }}
           env: ${{ matrix.env }}
           version: ${{ inputs.version }}
           # kind carrega a imagem por tag; cluster real recebe o digest verificado
           image: ${{ (matrix.settings.kubernetes.cluster || 'kind') == 'kind' && steps.image.outputs.tag || steps.verify.outputs.ref }}
-          config: ${{ toJSON(matrix.config) }}
           settings: ${{ toJSON(matrix.settings) }}
           config-dir: ${{ github.workspace }}/.app/config
           registry-token: ${{ github.token }}
@@ -176,70 +209,44 @@ jobs:
           azure-subscription-id: ${{ vars[format('AZURE_SUBSCRIPTION_ID_{0}', matrix.account)] }}
 
       - name: Deploy (gitops-pr)
-        if: matrix.driver == 'gitops-pr'
+        if: contains(matrix.drivers, 'gitops-pr')
         uses: ./.platform/.github/actions/deploy-gitops-pr
         with:
           command: ${{ inputs.command }}
-          app: ${{ matrix.artifact }}
+          artifacts: ${{ env.ARTIFACTS }}
           env: ${{ matrix.env }}
           version: ${{ inputs.version }}
           image: ${{ steps.verify.outputs.ref }}
-          config: ${{ toJSON(matrix.config) }}
           settings: ${{ toJSON(matrix.settings) }}
           config-dir: ${{ github.workspace }}/.app/config
           token: ${{ secrets.GITOPS_TOKEN || github.token }}
 
-      - name: Deploy (flyway)
-        if: matrix.driver == 'flyway'
-        uses: ./.platform/.github/actions/deploy-flyway
-        with:
-          command: ${{ inputs.command }}
-          app: ${{ matrix.artifact }}
-          env: ${{ matrix.env }}
-          config: ${{ toJSON(matrix.config) }}
-          settings: ${{ toJSON(matrix.settings) }}
-          migrations-dir: ${{ github.workspace }}/.app/${{ matrix.config.flyway.locations || 'db/migrations' }}
-          db-url: ${{ secrets.DB_URL }}
-          db-user: ${{ secrets.DB_USER }}
-          db-password: ${{ secrets.DB_PASSWORD }}
-
-      - name: Deploy (ecs)
-        if: matrix.driver == 'ecs'
-        uses: ./.platform/.github/actions/deploy-ecs
-        with:
-          command: ${{ inputs.command }}
-          app: ${{ matrix.artifact }}
-          env: ${{ matrix.env }}
-          version: ${{ inputs.version }}
-          image: ${{ steps.verify.outputs.ref }}
-          config: ${{ toJSON(matrix.config) }}
-          settings: ${{ toJSON(matrix.settings) }}
-          role-arn: ${{ vars[format('AWS_ROLE_ARN_{0}', matrix.account)] }}
-          region: ${{ vars.AWS_REGION }}
-
-      # ---- DAST contra o ambiente recem-entregue (so onde o pipeline alcanca o servico) ----
+      # ---- DAST contra cada servico recem-entregue (so onde o pipeline alcanca o servico) ----
       - name: Execute DAST
         if: >-
-          inputs.command == 'deploy' && matrix.driver == 'kubernetes' && matrix.config.containerPort
+          inputs.command == 'deploy' && contains(matrix.drivers, 'kubernetes')
           && fromJSON(needs.prepare-deploy.outputs.dast).enabled
         env:
           GATE: ${{ fromJSON(needs.prepare-deploy.outputs.dast).gate }}
-          APP: ${{ matrix.artifact }}
           ENV_NAME: ${{ matrix.env }}
-          PORT: ${{ matrix.config.containerPort || 8080 }}
           NAMESPACE: ${{ matrix.settings.kubernetes.namespace || '' }}
         run: |
           ns=${NAMESPACE:-$(tr '[:upper:]' '[:lower:]' <<<"$ENV_NAME")}
-          kubectl -n "$ns" port-forward "svc/$APP" 18080:"$PORT" >/dev/null 2>&1 &
-          sleep 3
           mkdir -p zap && chmod 777 zap
           flags=(-I); [ "$GATE" = true ] && flags=()
-          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
-            zap-baseline.py -t http://127.0.0.1:18080 -r zap-report.html "${flags[@]}"
+          status=0
+          while IFS=$'\t' read -r app port; do
+            kubectl -n "$ns" port-forward "svc/$app" 18080:"$port" >/dev/null 2>&1 &
+            pf=$!; sleep 3
+            docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
+              zap-baseline.py -t http://127.0.0.1:18080 -r "zap-$app.html" "${flags[@]}" || status=1
+            kill "$pf" 2>/dev/null || true
+          done < <(jq -r '.[] | select(.driver == "kubernetes" and .config.containerPort) | [.artifact, .config.containerPort] | @tsv' <<<"$ARTIFACTS")
+          exit "$status"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && inputs.command == 'deploy'
         with:
-          name: dast-${{ matrix.env }}-${{ matrix.artifact }}-${{ github.run_attempt }}
-          path: zap/zap-report.html
+          name: dast-${{ matrix.env }}-${{ github.run_attempt }}
+          path: zap/
           if-no-files-found: ignore

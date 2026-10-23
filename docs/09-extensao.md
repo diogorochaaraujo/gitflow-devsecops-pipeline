@@ -21,13 +21,15 @@ um `uses: build-${{ stack }}`.
 
 ## Um driver de deploy novo (ex.: `helm`)
 
-1. `.github/actions/deploy-helm/action.yml`: recebe `command`, `app`, `env`,
-   `version`, `image` (digest), `config` e `settings`, e implementa `deploy`,
-   `diff` e `destroy`;
+1. `.github/actions/deploy-helm/action.yml`: recebe `command`, `env`, `version`,
+   `image` (digest), `settings` e `artifacts` (a lista do ambiente). Faz o setup
+   **uma vez** e percorre os artefatos com `driver == "helm"`, implementando
+   `deploy`, `diff` e `destroy`;
 2. `schemas/deploy-config.schema.json`: `helm` no `enum` de `driver` e o bloco
    `helm` em `$defs.settings`;
-3. `stage-deploy.yml`: step `Deploy (helm)` com `if: matrix.driver == 'helm'`.
-   A credencial vem do grupo (`matrix.account`) ou de segredo do Environment;
+3. `stage-deploy.yml`: step `Deploy (helm)` com `if: contains(matrix.drivers, 'helm')`,
+   na posição certa da ordem dos drivers (banco antes de aplicação). A credencial
+   vem do grupo (`matrix.account`) ou de segredo do Environment;
 4. o driver **recebe o digest já verificado** (`steps.verify.outputs.ref`). Não
    resolva a tag de novo dentro do driver.
 

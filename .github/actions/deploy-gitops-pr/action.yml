@@ -6,7 +6,8 @@ description: >-
 inputs:
   command:
     default: deploy
-  app:
+  artifacts:
+    description: artefatos do ambiente (JSON); usa os de driver gitops-pr, num unico PR
     required: true
   env:
     required: true
@@ -15,8 +16,6 @@ inputs:
   image:
     description: imagem@sha256 (o estado guarda o digest, nunca uma tag movel)
     default: ""
-  config:
-    required: true
   settings:
     required: true
   config-dir:
@@ -61,11 +60,10 @@ runs:
       shell: bash
       working-directory: .state
       env:
-        APP: ${{ inputs.app }}
+        ALL_ARTIFACTS: ${{ inputs.artifacts }}
         ENV_NAME: ${{ inputs.env }}
         VERSION: ${{ inputs.version }}
         IMAGE: ${{ inputs.image }}
-        CONFIG: ${{ inputs.config }}
         TARGET_REPO: ${{ steps.target.outputs.repo }}
         STATE_BRANCH: ${{ steps.target.outputs.branch }}
         MODE: ${{ steps.target.outputs.mode }}
@@ -75,6 +73,7 @@ runs:
         CONFIG_DIR: ${{ inputs.config-dir }}
         SECRET_STORE: ${{ steps.target.outputs.secret-store }}
       run: |
-        log="$RUNNER_TEMP/gitops-$ENV_NAME-$APP.log"
+        ARTIFACTS=$(jq -c '[.[] | select(.driver == "gitops-pr")]' <<<"$ALL_ARTIFACTS"); export ARTIFACTS
+        log="$RUNNER_TEMP/gitops-$ENV_NAME.log"
         "$GITHUB_ACTION_PATH/../../../scripts/deploy-gitops.sh" "$COMMAND" | tee "$log"
         echo "pr=$(grep -o 'https://[^ ]*/pull/[0-9]*' "$log" | tail -1 || true)" >> "$GITHUB_OUTPUT"
