@@ -16,7 +16,8 @@ gh repo create <voce>/gitflow-devsecops-pipeline --public --source . --push
 scripts/bootstrap-repo.sh <voce>/gitflow-devsecops-pipeline
 ```
 
-O bootstrap cria a `dsv`, os labels, os Environments (PRD com você de revisor),
+O bootstrap cria a `dsv`, os labels, os Environments (com os revisores de
+`envs.<ENV>.reviewers` do `deploy-config.yml`),
 as regras da `main` (PR, merge commit, `Pipeline / Gate` verde, branch em dia) e
 das tags (imutáveis). A criação da `dsv` já dispara o primeiro **snapshot com
 deploy em DSV**.
@@ -44,7 +45,9 @@ git push -u origin TASK-1
 gh pr create --base dsv --fill && gh pr merge --merge
 ```
 
-O push na `dsv` faz snapshot **com deploy em DSV**: *Verify Artifact*
+O push na `dsv` faz snapshot **com deploy em DSV**, em ordem: primeiro
+`web-api-db` (Flyway num Postgres descartável: `Migracoes ok`), depois `web-api`,
+com *Verify Artifact*
 (`Proveniência verificada: ...@sha256:...`), cluster kind, rollout, smoke test
 (`Smoke test ok: web-api 0.x.0-<n>-SNAPSHOT em DSV`) e DAST.
 
@@ -55,11 +58,13 @@ gh pr create --base main --head dsv --title "release: primeira versao" --body "p
 ```
 
 **Primeira recusa, em segundos:** *Resolve* → *Commits Validations*: `O PR
-precisa de exatamente um label...`. Em *Report → Error Analysis* aparece a
+precisa de exatamente um label...`. Com o label e sem chamado, a segunda: `O PR
+de release precisa citar um chamado...`. Basta editar o título (`... (LAB-1)`):
+`edited` também reavalia. Em *Report → Error Analysis* aparece a
 classe **processo** e o que fazer.
 
 ```bash
-gh pr edit --add-label Release-Minor
+gh pr edit --add-label Release-Minor --title "release: primeira versao (LAB-1)"
 ```
 
 O label redispara (`types: labeled`). Agora: gates, *Gate* verde, *Stamp*
@@ -95,6 +100,9 @@ Cada experimento mostra um controle. Faça numa branch de tarefa.
 | imagem fora da esteira | `docker build` local, `docker push ghcr.io/<voce>/web-api:9.9.9`, e *Redeploy* `9.9.9` em DSV | *Verify Artifact* recusa: sem attestation do `stage-build.yml` |
 | branch atrás da main | hotfix direto na `main` e o PR de release sem trazer a `main` | *Commits Validations*: `N commit(s) atras de main` |
 | app que não sobe | faça `route("/health")` devolver `503` | rollout não estabiliza; o job mostra pods e logs |
+| migração publicada editada | depois da primeira release, edite `db/migrations/V1__*.sql` | *Resolve*: `Migracao publicada em X.Y.Z foi alterada`; a correção é uma `V2__*.sql` |
+| segredo no arquivo de configuração | `DB_PASSWORD=x` em `config/web-api/dsv.env` | o deploy recusa: chave com cara de segredo vai em `secrets` |
+| segredo sem cofre | `secrets: [BANCO]` em `web-api` | o deploy recusa: o ambiente não tem `kubernetes.secretStore` |
 | rollback manual | *Actions → Redeploy*: `deploy`, versão anterior, DSV | entrega a versão antiga, com verificação |
 | aprovação esquecida | deixe o PRD esperando e rode *Actions → Housekeeping* | issue *Deploys aguardando aprovacao* com a data de expiração |
 

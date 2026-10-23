@@ -15,6 +15,13 @@ escreve o código são **vários fornecedores**.
 - **Prova de origem**: toda imagem sai com SBOM e attestation assinada, e
   nenhum deploy aceita imagem que não tenha sido construída pela plataforma.
 - **Promoção do mesmo digest** de DSV até PRD, sem rebuild.
+- **Vários artefatos por repositório**, cada um com seu driver e sua ordem. No
+  lab, as migrações do banco (Flyway) rodam antes da API em todo ambiente, e
+  migração já publicada não pode ser editada.
+- **Configuração por ambiente** em `config/<artefato>/<env>.env` e **segredos só
+  por nome**, resolvidos no cofre do cluster: o pipeline nunca vê o valor.
+- **Quem aprova cada ambiente, como código** (`envs.<ENV>.reviewers`), e release
+  amarrada a um chamado (`flow.changeRef`).
 - **Governança como código** para a organização: regras, política de Actions,
   OIDC preso ao workflow, entrada e saída de fornecedor.
 
@@ -69,7 +76,7 @@ flowchart LR
 Em Docker, sem instalar nada:
 
 ```bash
-scripts/tests/run.sh                                  # testes dos scripts (versão, roteamento, matriz, manifesto)
+scripts/tests/run.sh                                  # 64 testes: versão, roteamento, matriz, manifesto, migrações, classificação de erro
 scripts/validate-config.sh .                          # pipeline.yml e deploy-config.yml contra o schema
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/zizmorcore/zizmor:1.30.1 --offline .github/
