@@ -32,7 +32,8 @@ flowchart LR
 
 ## O deploy por dentro (`stage-deploy`)
 
-1. **Prepare Deploy** resolve o commit de origem da versão e monta a matriz:
+1. **Prepare Deploy** resolve o commit de origem da versão, aplica a **política
+   de promoção** (o ambiente aceita esse tipo de versão? ela foi publicada?) e monta a matriz:
    **um item por ambiente**, na ordem pedida, com os artefatos daquele ambiente
    (`defaults` → `envs.<ENV>` e `artifacts.<a>` → `envs.<ENV>.artifacts.<a>`).
 2. **Um job por ambiente**, em série, com `environment: <ENV>` (aprovação,

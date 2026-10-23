@@ -137,7 +137,27 @@ check "classifica: chamado" "processo" "$(cls 'O PR de release precisa citar um 
 check "classifica: teste python" "build" "$(cls 'FAILED (failures=1)')"
 check "classifica: teste node" "build" "$(cls '3 failing')"
 check "classifica: migracao" "processo" "$(cls 'Migracao publicada em 1.0.0 foi alterada em db/migrations.')"
+check "classifica: politica de promocao" "processo" "$(cls 'PRD e ambiente de release e nao aceita versao snapshot (1.0.0-3-SNAPSHOT).')"
 check "classifica: desconhecido" "nao classificado" "$(cls 'algo totalmente novo')"
+
+# ---------- check-deploy-policy.sh ----------
+pol=$(mktemp -d); ( cd "$pol" && git init -q -b main && git config user.email t@t && git config user.name t \
+  && git commit -q --allow-empty -m i && git tag 1.2.0 && git tag 1.3.0-7 )
+flow='{"flow":{"environments":{"snapshot":["DSV"],"candidate":["HMG"],"release":["PRD","CTG"]}}}'
+# GITHUB_REPOSITORY vazio: o teste consulta as tags do repositorio de teste, nunca as do repositorio real (no CI a variavel existe)
+pp() { ( cd "$pol" && GITHUB_REPOSITORY="" PIPELINE=$flow "$s/check-deploy-policy.sh" "$1" "$2" >/dev/null 2>&1 ); echo $?; }
+check "politica: release publicada em PRD" "0" "$(pp PRD 1.2.0)"
+check "politica: RC em PRD recusada" "1" "$(pp PRD 1.3.0-7)"
+check "politica: snapshot em PRD recusado" "1" "$(pp PRD 1.3.0-9-SNAPSHOT)"
+check "politica: release sem tag recusada" "1" "$(pp PRD 9.9.9)"
+check "politica: RC publicada em HMG" "0" "$(pp HMG 1.3.0-7)"
+check "politica: snapshot em HMG recusado" "1" "$(pp HMG 1.3.0-9-SNAPSHOT)"
+check "politica: snapshot em DSV" "0" "$(pp DSV 1.3.0-9-SNAPSHOT)"
+check "politica: fora do fluxo aceita RC" "0" "$(pp TST 1.3.0-7)"
+check "politica: fora do fluxo recusa snapshot" "1" "$(pp TST 1.3.0-9-SNAPSHOT)"
+check "politica: varios ambientes, um recusado" "1" "$(pp PRD,CTG 1.3.0-7)"
+check "politica: formato invalido" "1" "$(pp DSV latest)"
+rm -rf "$pol"
 
 echo
 echo "testes: $pass ok, $fail falharam"

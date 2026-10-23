@@ -4,6 +4,7 @@ Failed to load .*action\.ya?ml|action manifest|Mapping values are not allowed|wo
 commits? atras de	processo	Fazer merge da base na branch do PR (git merge origin/main) e enviar de novo.
 exatamente um label	processo	Colocar um unico label Release-Major, Release-Minor ou Release-Patch no PR.
 citar um chamado	processo	Citar o chamado (ex.: ABC-123) no titulo, no corpo ou no nome da branch do PR de release.
+e ambiente de .* nao aceita versao|nao foi publicada \(sem tag\)	processo	Politica de promocao: levar a versao pela esteira (snapshot -> candidata -> release); producao so recebe release publicada.
 Migracao publicada .* foi alterada	processo	Reverter a edicao da migracao existente e criar uma nova (V<n+1>__descricao.sql).
 cara de segredo	seguranca	Tirar o valor do arquivo config/<artefato>/<env>.env e declarar o nome em artifacts.<a>.secrets.
 declara secrets, mas	configuracao	Definir kubernetes.secretStore no ambiente (External Secrets) ou remover secrets do artefato.

@@ -1,5 +1,12 @@
 # gitflow-devsecops-pipeline
 
+[![Licença: Apache-2.0](https://img.shields.io/badge/c%C3%B3digo-Apache--2.0-blue.svg)](LICENSE)
+[![Docs: CC BY 4.0](https://img.shields.io/badge/docs-CC%20BY%204.0-lightgrey.svg)](LICENSE-docs)
+[![Platform CI](https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline/actions/workflows/platform-ci.yml/badge.svg?branch=main)](https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline/actions/workflows/platform-ci.yml)
+
+Por **[Diogo Rocha de Araujo](https://github.com/diogorochaaraujo)**, engenharia
+de plataforma, DevOps e DevSecOps.
+
 Template **modular** de esteira em GitHub Actions para organizações que
 precisam controlar *como* o código chega à produção, inclusive quando quem
 escreve o código são **vários fornecedores**.
@@ -21,8 +28,10 @@ escreve o código são **vários fornecedores**.
   migração já publicada não pode ser editada.
 - **Configuração por ambiente** em `config/<artefato>/<env>.env` e **segredos só
   por nome**, resolvidos no cofre do cluster: o pipeline nunca vê o valor.
-- **Quem aprova cada ambiente, como código** (`envs.<ENV>.reviewers`), e release
-  amarrada a um chamado (`flow.changeRef`).
+- **Quem aprova cada ambiente, como código** (`envs.<ENV>.reviewers`), **uma
+  aprovação por ambiente**, e release amarrada a um chamado (`flow.changeRef`).
+- **Política de promoção**: PRD só aceita release publicada, HMG só candidata ou
+  release, e isso vale também para o redeploy manual, antes de qualquer aprovação.
 - **Governança como código** para a organização: regras, política de Actions,
   OIDC preso ao workflow, entrada e saída de fornecedor.
 
@@ -52,6 +61,7 @@ flowchart LR
 
 | Quero... | Leia |
 |---|---|
+| **ver o fluxo inteiro numa página: etapas E0–E12, quem age, o que bloqueia** | [00 · Mapa do processo](docs/00-mapa-do-processo.md) |
 | entender as camadas e o contrato entre elas | [01 · Arquitetura](docs/01-arquitetura.md) |
 | escolher entre gitflow e trunk; versões e tags | [02 · Fluxos](docs/02-fluxos.md) |
 | ver o que roda em cada evento, job a job | [03 · Pipelines](docs/03-pipelines.md) |
@@ -61,6 +71,7 @@ flowchart LR
 | as lições do modelo de referência | [07 · Melhorias](docs/07-melhorias.md) |
 | **controlar vários fornecedores na mesma organização** | [08 · Fornecedores](docs/08-fornecedores.md) |
 | criar uma stack, um driver ou um fluxo novo | [09 · Extensão](docs/09-extensao.md) |
+| evoluir a própria esteira sem quebrar as aplicações | [10 · Plataforma](docs/10-plataforma.md) |
 
 ## Mapa do repositório
 
@@ -92,4 +103,24 @@ scripts/tests/run.sh                                  # 64 testes: versão, rote
 scripts/validate-config.sh .                          # pipeline.yml e deploy-config.yml contra o schema
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/zizmorcore/zizmor:1.30.1 --offline .github/
+docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh scripts/governance/*.sh scripts/tests/*.sh
 ```
+
+## Autoria, licença e como dar crédito
+
+Criado e mantido por **[Diogo Rocha de Araujo](https://github.com/diogorochaaraujo)**.
+
+- **Código** (workflows, actions, scripts, schemas, templates):
+  [Apache License 2.0](LICENSE). Pode usar, adaptar e redistribuir, inclusive
+  comercialmente, **mantendo o arquivo [`NOTICE`](NOTICE)** com a atribuição.
+- **Documentação** (`docs/`, README, diagramas): [CC BY 4.0](LICENSE-docs). Pode
+  reutilizar e adaptar **dando o crédito**.
+
+Para dar crédito numa apresentação, documento ou repositório derivado:
+
+> Baseado em [gitflow-devsecops-pipeline](https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline),
+> de Diogo Rocha de Araujo, sob Apache-2.0 / CC BY 4.0.
+
+Também dá para usar o botão **"Cite this repository"** do GitHub ([`CITATION.cff`](CITATION.cff)).
+Usou ou adaptou? Conte numa *issue*: ver o template em uso em outros cenários é
+o que mais ajuda a evoluir ([CONTRIBUTING](CONTRIBUTING.md)).

@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "Se usar este template ou a documentacao dele, cite assim."
+title: "gitflow-devsecops-pipeline: template modular de esteira GitHub Actions com gates DevSecOps e governanca multi-fornecedor"
+type: software
+authors:
+  - given-names: Diogo
+    family-names: Rocha de Araujo
+    alias: diogorochaaraujo
+repository-code: "https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline"
+url: "https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline"
+license: Apache-2.0
+version: 0.2.1
+date-released: 2026-10-23
+keywords:
+  - github-actions
+  - devsecops
+  - gitflow
+  - gitops
+  - supply-chain-security
+  - platform-engineering
