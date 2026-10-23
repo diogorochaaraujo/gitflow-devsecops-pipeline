@@ -1,0 +1,43 @@
+name: build-java
+description: Compila e testa um projeto Java (Maven ou Gradle) com cache de dependencias.
+
+inputs:
+  version:
+    default: "21"
+  distribution:
+    default: temurin
+  tool:
+    description: maven | gradle
+    default: maven
+  working-directory:
+    default: "."
+  test:
+    description: Comando (vazio = `mvn -B verify` / `gradle build`, usando o wrapper se existir)
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      with:
+        java-version: ${{ inputs.version }}
+        distribution: ${{ inputs.distribution }}
+        cache: ${{ inputs.tool }}
+        cache-dependency-path: |
+          ${{ inputs.working-directory }}/**/pom.xml
+          ${{ inputs.working-directory }}/**/*.gradle*
+
+    # testes rodam aqui, nunca com -DskipTests: o Dockerfile so empacota o que ja passou
+    - name: Build and Test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TOOL: ${{ inputs.tool }}
+        CMD: ${{ inputs.test }}
+      run: |
+        if [ -n "$CMD" ]; then bash -c "$CMD"
+        elif [ "$TOOL" = maven ]; then
+          if [ -x ./mvnw ]; then ./mvnw -B -ntp verify; else mvn -B -ntp verify; fi
+        else
+          if [ -x ./gradlew ]; then ./gradlew build --no-daemon; else gradle build --no-daemon; fi
+        fi

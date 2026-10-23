@@ -1,9 +1,17 @@
-# Dono padrao do repositorio. Num time, troque por @org/time-mantenedor.
+# Dono padrao do repositorio. Numa organizacao: o time do cliente que revisa
+# o que os fornecedores entregam (ex.: @org/lideres-tecnicos).
 * @diogorochaaraujo
 
-# Arquivos da plataforma: em producao ficam sob outro time e protegidos por
-# regra de push (docs/02-gitflow.md#protecoes).
-/.github/workflows/pipeline-*.yml @diogorochaaraujo
-/.github/actions/                 @diogorochaaraujo
-/scripts/                         @diogorochaaraujo
-/templates/                       @diogorochaaraujo
+# Esteira e governanca: time de plataforma. Num repositorio de fornecedor,
+# estes caminhos tambem ficam bloqueados por regra de push.
+/.github/workflows/                 @diogorochaaraujo
+/.github/actions/                   @diogorochaaraujo
+/.github/CODEOWNERS                 @diogorochaaraujo
+/scripts/                           @diogorochaaraujo
+/schemas/                           @diogorochaaraujo
+/templates/                         @diogorochaaraujo
+/governance/                        @diogorochaaraujo
+
+# Excecoes e gates de seguranca: time de seguranca do cliente.
+/.github/configs/security-config.yml @diogorochaaraujo
+/.trivyignore.yaml                   @diogorochaaraujo

@@ -1,27 +1,27 @@
 # 06 · Laboratório ponta a ponta
 
-Do repositório vazio a uma release em PRD, passando por todos os gates. Tempo
-estimado: 40 minutos, quase todo esperando runner.
+Do repositório vazio a uma release em PRD por GitOps, passando por todos os
+gates. Uns 40 minutos, quase todos esperando runner.
 
 ## Pré-requisitos
 
-- conta no GitHub e `gh` autenticado nela (`gh auth status`);
-- repositório **público**. Em conta pessoal gratuita, revisor de Environment e
-  rulesets só funcionam em repositório público. O bootstrap avisa e segue se não
-  der.
+- `gh` autenticado na sua conta (`gh auth status`);
+- repositório **público**: numa conta gratuita, revisor de Environment, rulesets
+  e attestations só funcionam em repositório público.
 
-## 1. Criar e preparar o repositório
+## 1. Criar e preparar
 
 ```bash
 gh repo create <voce>/gitflow-devsecops-pipeline --public --source . --push
 scripts/bootstrap-repo.sh <voce>/gitflow-devsecops-pipeline
 ```
 
-O primeiro push na `main` não dispara nada (o snapshot ignora a `main`). O
-bootstrap cria a `dsv`, os labels, os Environments (PRD com você como revisor),
-as regras da `main` e das tags, e libera o `GITHUB_TOKEN` para abrir PR.
+O bootstrap cria a `dsv`, os labels, os Environments (PRD com você de revisor),
+as regras da `main` (PR, merge commit, `Pipeline / Gate` verde, branch em dia) e
+das tags (imutáveis). A criação da `dsv` já dispara o primeiro **snapshot com
+deploy em DSV**.
 
-## 2. Uma tarefa: snapshot sem deploy
+## 2. Tarefa: snapshot sem deploy
 
 ```bash
 git switch -c TASK-1 origin/dsv
@@ -30,20 +30,23 @@ git commit -am "feat(api): campo novo na raiz" -m "Refs: TASK-1"
 git push -u origin TASK-1
 ```
 
-**Observe** em *Actions → Snapshot*: Prepare, Security, Build, Container e Report
-rodam. *Environment Deploy* aparece como **skipped**, porque `TASK-1` não está em
-`SnapshotBranches`. No resumo do run, a versão: `0.1.0-<n>-SNAPSHOT`.
+**Observe** em *Actions → Pipeline*:
 
-## 3. Integração: deploy em DSV
+- *Resolve* mostra `Etapa: snapshot`;
+- Security e Build rodam;
+- no Build, o log do step *Container* termina com a attestation registrada;
+- os jobs de deploy aparecem como **skipped**, porque `TASK-1` não é a branch
+  de integração.
+
+## 3. Integração: DSV
 
 ```bash
 gh pr create --base dsv --fill && gh pr merge --merge
 ```
 
-O merge é um push na `dsv`. **Observe:** o snapshot agora tem *Environment
-Deploy → DSV*: cluster kind sobe, rollout, smoke test (`Smoke test ok: web-api
-0.1.0-<n>-SNAPSHOT em DSV`) e o relatório do ZAP como artefato. Em *Settings →
-Environments → DSV* aparece o histórico de deploy.
+O push na `dsv` faz snapshot **com deploy em DSV**: *Verify Artifact*
+(`Proveniência verificada: ...@sha256:...`), cluster kind, rollout, smoke test
+(`Smoke test ok: web-api 0.x.0-<n>-SNAPSHOT em DSV`) e DAST.
 
 ## 4. Release: PR `dsv → main`
 
@@ -51,68 +54,59 @@ Environments → DSV* aparece o histórico de deploy.
 gh pr create --base main --head dsv --title "release: primeira versao" --body "primeira release"
 ```
 
-**Observe a primeira recusa:** sem label, *Commits Validations* falha com
-`O PR precisa de exatamente um label...`. *Error Analysis* repete a mensagem no
-resumo.
+**Primeira recusa, em segundos:** *Resolve* → *Commits Validations*: `O PR
+precisa de exatamente um label...`. Em *Report → Error Analysis* aparece a
+classe **processo** e o que fazer.
 
 ```bash
 gh pr edit --add-label Release-Minor
 ```
 
-O label dispara o Start Release de novo (`types: labeled`). Agora sim: gates,
-*Release Validation* verde, *Create Release Stamp* cria a tag `0.1.0-<n>`, e
-*Deploy NPROD* entrega em HMG.
+O label redispara (`types: labeled`). Agora: gates, *Gate* verde, *Stamp*
+(`0.1.0-<n>`), *Deploy candidate* em HMG.
+
+## 5. Merge e produção por GitOps
 
 ```bash
-git fetch --tags && git tag -l   # a RC aparece
+gh pr merge --merge
 ```
 
-## 5. Merge e produção
+**Observe:**
 
-```bash
-gh pr merge --merge     # merge commit, nunca squash
-```
-
-**Observe** o Finish Release:
-
-1. *Release Validation* acha a RC no commit;
-2. *Promote Artifact* cria `0.1.0` apontando para o **mesmo digest** da RC.
-   Confira com `docker buildx imagetools inspect ghcr.io/<voce>/web-api:0.1.0` e
-   `...:0.1.0-<n>`;
-3. *Deploy → PRD* fica **aguardando aprovação**. Aprove em *Review deployments*;
-4. *Back-merge* abre o PR `main → dsv`. Mergeie (merge commit).
-
-Em *Releases* aparece a `0.1.0` com as notas geradas.
+1. *Promote* cria `0.1.0` com o **mesmo digest** da RC (`Mesmo digest:
+   sha256:...`), a tag git e a GitHub Release;
+2. *Deploy release → PRD* espera **aprovação**. Aprove em *Review deployments*;
+3. o driver `gitops-pr` verifica a attestation e abre um PR para a branch
+   `environments` com `envs/prd/web-api.yaml` apontando para
+   `web-api@sha256:...`. **O merge desse PR é o deploy de produção**;
+4. *Back-merge* abre o PR `main → dsv`. Mergeie com merge commit.
 
 ## 6. Quebre de propósito
 
-Cada experimento mostra um gate. Faça numa branch de tarefa e abra PR para a `dsv`.
+Cada experimento mostra um controle. Faça numa branch de tarefa.
 
 | Experimento | Como | O que deve acontecer |
 |---|---|---|
-| segredo no código | `echo "TOKEN=ghp_$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom \| head -c 36)" > app/config.txt` (token falso, aleatório; valores com `EXAMPLE` são ignorados pela ferramenta) | *Secrets* falha no snapshot da branch. Remover o arquivo num commit novo **não** resolve, porque o scan lê o histórico inteiro: é preciso reescrever a branch, e com um segredo real, revogá-lo |
-| dependência vulnerável | crie `app/requirements.txt` com `django==2.2.0` | *SCA* falha listando as CVEs críticas |
-| exceção com prazo | adicione as CVEs no `.trivyignore.yaml` com `expired_at` no futuro, depois no passado | passa, depois volta a falhar |
-| branch atrás da main | mergeie algo direto na `main` (via PR de hotfix) e atualize o PR de release sem trazer a `main` | *Commits Validations*: `N commit(s) atras de main` |
-| PR sem Start Release | tente mergear o PR de release com o check vermelho | o ruleset bloqueia o botão de merge |
-| app que não sobe | faça `route("/health")` em `app/app.py` devolver `503` | readiness nunca passa, o rollout não estabiliza e o job mostra pods e logs |
-| rollback manual | *Actions → Redeploy*: `deploy`, versão anterior, PRD | aprovação, e a versão antiga volta |
+| config com erro de digitação | troque `container:` por `contaner:` no `pipeline.yml` | *Resolve* falha em segundos: `Additional properties are not allowed ('contaner' ...)` |
+| sem teste | apague `test:` do bloco `python` | *Build* falha: `Nenhum teste: defina build.python.test...` |
+| segredo no código | `echo "TOKEN=ghp_$(LC_ALL=C tr -dc A-Za-z0-9 </dev/urandom \| head -c 36)" > app/config.txt` (token falso; valores com `EXAMPLE` são ignorados pelo scanner) | *Secrets* falha. Remover num commit novo **não** resolve, porque o scan lê o histórico: é preciso reescrever a branch e, com segredo real, revogá-lo |
+| dependência vulnerável | `app/requirements.txt` com `django==2.2.0` | *SCA* falha com CVEs críticas |
+| exceção com prazo | as CVEs no `.trivyignore.yaml` com `expired_at` futuro, depois passado | passa, depois volta a falhar |
+| imagem fora da esteira | `docker build` local, `docker push ghcr.io/<voce>/web-api:9.9.9`, e *Redeploy* `9.9.9` em DSV | *Verify Artifact* recusa: sem attestation do `stage-build.yml` |
+| branch atrás da main | hotfix direto na `main` e o PR de release sem trazer a `main` | *Commits Validations*: `N commit(s) atras de main` |
+| app que não sobe | faça `route("/health")` devolver `503` | rollout não estabiliza; o job mostra pods e logs |
+| rollback manual | *Actions → Redeploy*: `deploy`, versão anterior, DSV | entrega a versão antiga, com verificação |
+| aprovação esquecida | deixe o PRD esperando e rode *Actions → Housekeeping* | issue *Deploys aguardando aprovacao* com a data de expiração |
 
-## 7. Separar a plataforma (opcional)
+## 7. Trunk-based (opcional)
 
-Siga [01 · Arquitetura → Separando as camadas](01-arquitetura.md#separando-as-camadas)
-para ver o desenho real: um repositório de plataforma com tag `v1` e esta app
-consumindo de lá.
+Num repositório novo, copie `examples/node-trunk-gitops/` (ou troque `flow.model:
+trunk` e `versioning: conventional` neste). PRs para `main` rodam *verify*; cada
+merge na `main` gera RC pelos commits, entrega em `candidate` em ordem, promove e
+pede aprovação para PRD.
 
-## 8. Driver ECS (opcional, conta AWS própria)
+## 8. Separar a plataforma
 
-1. Crie (via IaC ou console) cluster, ALB, um serviço `web-api-dsv` e uma task
-   definition inicial com container `web-api`;
-2. crie um provedor OIDC para `token.actions.githubusercontent.com` e um papel
-   que confie no repositório (`repo:<voce>/<repo>:environment:DSV`);
-3. em *Settings → Variables*: `AWS_REGION`, `AWS_ROLE_ARN_NPRD`
-   (e `AWS_ROLE_ARN_PRD` se separar contas);
-4. troque `serverType: ecs` no `deploy-config.yml`.
-
-O driver não foi exercitado pelo laboratório: veja o cabeçalho de
-`scripts/deploy-ecs.sh`.
+[01 · Arquitetura → Separando as camadas](01-arquitetura.md#separando-as-camadas).
+É o passo que dá às attestations o nível SLSA L3 e permite proteger a esteira
+do time da aplicação.

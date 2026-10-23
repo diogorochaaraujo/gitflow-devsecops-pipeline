@@ -1,0 +1,86 @@
+name: build-node
+description: Instala dependencias com cache, roda lint, testes e build de um projeto Node.
+
+inputs:
+  version:
+    default: "22"
+  working-directory:
+    default: "."
+  package-manager:
+    description: npm | pnpm | yarn
+    default: npm
+  lint:
+    description: Comando de lint (vazio = script "lint" do package.json, se existir)
+    default: ""
+  test:
+    description: Comando de teste (vazio = script "test" do package.json)
+    default: ""
+  build:
+    description: Comando de build (vazio = script "build", se existir)
+    default: ""
+  require-tests:
+    description: Falha se nao houver teste a executar
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Enable Corepack
+      if: inputs.package-manager != 'npm'
+      shell: bash
+      run: corepack enable
+
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.version }}
+        cache: ${{ inputs.package-manager }}
+        cache-dependency-path: ${{ inputs.working-directory }}/*lock*
+
+    - name: Install
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PM: ${{ inputs.package-manager }}
+      run: |
+        case "$PM" in
+          npm)  npm ci --no-audit --no-fund ;;
+          pnpm) pnpm install --frozen-lockfile ;;
+          yarn) yarn install --immutable ;;
+        esac
+
+    - name: Lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PM: ${{ inputs.package-manager }}
+        CMD: ${{ inputs.lint }}
+      run: |
+        if [ -n "$CMD" ]; then bash -c "$CMD"
+        elif jq -e '.scripts.lint' package.json >/dev/null; then "$PM" run lint
+        else echo "sem lint configurado"; fi
+
+    - name: Test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PM: ${{ inputs.package-manager }}
+        CMD: ${{ inputs.test }}
+        REQUIRE: ${{ inputs.require-tests }}
+        CI: "true"
+      run: |
+        if [ -n "$CMD" ]; then bash -c "$CMD"
+        elif jq -e '.scripts.test' package.json >/dev/null; then "$PM" test
+        elif [ "$REQUIRE" = true ]; then
+          echo "::error::Nenhum teste: defina build.node.test ou o script \"test\" no package.json."; exit 1
+        else echo "::warning::Nenhum teste executado."; fi
+
+    - name: Build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PM: ${{ inputs.package-manager }}
+        CMD: ${{ inputs.build }}
+      run: |
+        if [ -n "$CMD" ]; then bash -c "$CMD"
+        elif jq -e '.scripts.build' package.json >/dev/null; then "$PM" run build
+        else echo "sem build configurado"; fi

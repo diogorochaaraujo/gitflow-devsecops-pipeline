@@ -1,0 +1,258 @@
+# Plataforma / orquestrador: a UNICA entrada chamada pelo repositorio da aplicacao.
+# O que roda depende do evento e do flow.model do pipeline.yml (scripts/resolve.sh):
+#
+#   Resolve (valida config, roteia, versiona)
+#     +--> Security ----+
+#     +--> Build -------+--> Gate --> Stamp (RC) --> Deploy candidate/snapshot
+#                                                          |
+#                                   Promote (RC -> X.Y.Z) <+--> Deploy release --> Report
+#                                         +--> Back-merge
+#
+# "Pipeline / Gate" e o check obrigatorio dos rulesets: um nome estavel,
+# verde so quando todo gate exigido nesta execucao passou.
+name: Platform
+
+on:
+  workflow_call:
+    inputs:
+      platform-repository:
+        description: Repositorio da plataforma (vazio = o proprio repositorio)
+        type: string
+        default: ""
+      platform-ref:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      stage: ${{ steps.route.outputs.stage }}
+      build: ${{ steps.route.outputs.build }}
+      stamp: ${{ steps.route.outputs.stamp }}
+      pre-envs: ${{ steps.route.outputs.pre-envs }}
+      promote: ${{ steps.route.outputs.promote }}
+      post-envs: ${{ steps.route.outputs.post-envs }}
+      back-merge: ${{ steps.route.outputs.back-merge }}
+      publish: ${{ steps.route.outputs.publish }}
+      integration-branch: ${{ steps.route.outputs.integration-branch }}
+      skip: ${{ steps.route.outputs.skip }}
+      head-sha: ${{ steps.route.outputs.head-sha }}
+      version: ${{ steps.prep.outputs.version }}
+      name: ${{ steps.prep.outputs.name }}
+      pipeline: ${{ steps.prep.outputs.pipeline }}
+      security: ${{ steps.prep.outputs.security }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+          persist-credentials: false
+
+      # erro de configuracao para aqui, em segundos, nao no meio do build
+      - name: Validate Config
+        run: .platform/scripts/validate-config.sh .
+
+      - id: route
+        name: Resolve Stage
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          ACTOR: ${{ github.actor }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          route=$(PIPELINE=$(yq -o=json -I=0 '.' pipeline.yml) .platform/scripts/resolve.sh)
+          echo "$route"
+          stage=$(sed -n 's/^stage=//p' <<<"$route")
+          skip='[]'
+          case "$stage" in snapshot|verify) skip=$(yq -o=json -I=0 '.security.skipOnSnapshot // []' pipeline.yml) ;; esac
+          { echo "skip=$skip"; echo "head-sha=$HEAD_SHA"; } >> "$GITHUB_OUTPUT"
+          echo "### Etapa: \`$stage\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - id: pr
+        name: Commits Validations
+        if: steps.route.outputs.stage == 'candidate' && github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: VERSIONING=$(yq '.flow.versioning' pipeline.yml) .platform/scripts/validate-pr.sh
+
+      - id: prep
+        if: steps.route.outputs.build == 'true' || steps.route.outputs.promote == 'true'
+        uses: ./.platform/.github/actions/prepare
+        with:
+          mode: ${{ steps.route.outputs.stage == 'candidate' && 'release' || 'snapshot' }}
+          release-type: ${{ steps.pr.outputs.release-type || 'auto' }}
+
+  security:
+    name: Security
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    uses: ./.github/workflows/stage-security.yml
+    with:
+      security: ${{ needs.resolve.outputs.security }}
+      ref: ${{ needs.resolve.outputs.head-sha }}
+      skip: ${{ needs.resolve.outputs.skip }}
+
+  build:
+    name: Build
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/stage-build.yml
+    with:
+      version: ${{ needs.resolve.outputs.version }}
+      name: ${{ needs.resolve.outputs.name }}
+      pipeline: ${{ needs.resolve.outputs.pipeline }}
+      security: ${{ needs.resolve.outputs.security }}
+      ref: ${{ needs.resolve.outputs.head-sha }}
+      publish: ${{ needs.resolve.outputs.publish == 'true' }}
+      skip-container-scan: ${{ contains(fromJSON(needs.resolve.outputs.skip), 'container') }}
+      platform-repository: ${{ inputs.platform-repository }}
+      platform-ref: ${{ inputs.platform-ref }}
+
+  gate:
+    name: Gate
+    needs: [resolve, security, build]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Required Gates
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          BUILD: ${{ needs.resolve.outputs.build }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          required='["resolve"]'; [ "$BUILD" = true ] && required='["resolve","security","build"]'
+          if ! jq -e --argjson r "$required" '[$r[] as $k | .[$k].result] | all(. == "success")' <<<"$NEEDS" >/dev/null; then
+            echo "::error::Gate reprovado: ha etapa obrigatoria que nao passou (veja Error Analysis)."
+            exit 1
+          fi
+
+  stamp:
+    name: Stamp
+    needs: [resolve, gate]
+    if: needs.resolve.outputs.stamp == 'true' && needs.resolve.outputs.publish == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/stage-release.yml
+    with:
+      mode: stamp
+      name: ${{ needs.resolve.outputs.name }}
+      version: ${{ needs.resolve.outputs.version }}
+      head-sha: ${{ needs.resolve.outputs.head-sha }}
+
+  deploy-pre:
+    name: Deploy ${{ needs.resolve.outputs.stage }}
+    needs: [resolve, gate, stamp]
+    if: >-
+      always() && needs.resolve.outputs.pre-envs != '' && needs.gate.result == 'success'
+      && (needs.stamp.result == 'success' || needs.stamp.result == 'skipped')
+      && needs.resolve.outputs.publish == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: read
+      attestations: read
+      id-token: write
+    uses: ./.github/workflows/stage-deploy.yml
+    with:
+      environments: ${{ needs.resolve.outputs.pre-envs }}
+      version: ${{ needs.resolve.outputs.version }}
+      ref: ${{ needs.resolve.outputs.head-sha }}
+      platform-repository: ${{ inputs.platform-repository }}
+      platform-ref: ${{ inputs.platform-ref }}
+
+  promote:
+    name: Promote
+    needs: [resolve, gate, deploy-pre]
+    if: >-
+      always() && needs.resolve.outputs.promote == 'true' && needs.gate.result == 'success'
+      && (needs.deploy-pre.result == 'success' || needs.deploy-pre.result == 'skipped')
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/stage-release.yml
+    with:
+      mode: promote
+      name: ${{ needs.resolve.outputs.name }}
+      # trunk: a RC acabou de ser carimbada nesta execucao; gitflow: procurada no commit do PR
+      rc: ${{ needs.resolve.outputs.stamp == 'true' && needs.resolve.outputs.version || '' }}
+      head-sha: ${{ needs.resolve.outputs.head-sha }}
+      target-sha: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+  deploy-post:
+    name: Deploy release
+    needs: [resolve, promote]
+    if: always() && needs.resolve.outputs.post-envs != '' && needs.promote.result == 'success'
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: read
+      attestations: read
+      id-token: write
+    uses: ./.github/workflows/stage-deploy.yml
+    with:
+      environments: ${{ needs.resolve.outputs.post-envs }}
+      version: ${{ needs.promote.outputs.version }}
+      ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+      platform-repository: ${{ inputs.platform-repository }}
+      platform-ref: ${{ inputs.platform-ref }}
+
+  # sem isto o proximo PR de release nasce "1 commit atras da main" (o merge commit)
+  back-merge:
+    name: Back-merge
+    needs: [resolve, promote]
+    if: always() && needs.resolve.outputs.back-merge == 'true' && needs.promote.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Open PR main -> integracao
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INTEGRATION: ${{ needs.resolve.outputs.integration-branch }}
+          VERSION: ${{ needs.promote.outputs.version }}
+        run: |
+          existing=$(gh pr list -R "$GITHUB_REPOSITORY" --base "$INTEGRATION" --head main --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then echo "PR de back-merge ja aberto: #$existing"; exit 0; fi
+          gh pr create -R "$GITHUB_REPOSITORY" --base "$INTEGRATION" --head main \
+            --title "chore(release): back-merge $VERSION" \
+            --body "Traz o merge da release $VERSION de volta para \`$INTEGRATION\`. Mergear com merge commit, sem squash."
+
+  report:
+    name: Report
+    needs: [resolve, security, build, gate, stamp, deploy-pre, promote, deploy-post, back-merge]
+    if: always()
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/stage-report.yml
+    with:
+      stage: ${{ needs.resolve.outputs.stage || 'resolve' }}
+      version: ${{ needs.promote.outputs.version || needs.resolve.outputs.version }}
+      results: ${{ toJSON(needs) }}
+      platform-repository: ${{ inputs.platform-repository }}
+      platform-ref: ${{ inputs.platform-ref }}

@@ -1,0 +1,27 @@
+defaults:
+  driver: gitops-pr
+  gitops:
+    repository: minha-org/ambientes      # repositorio de estado separado (token: segredo GITOPS_TOKEN)
+    branch: main
+    mode: commit                         # nao produtivos: commit direto, o agente aplica
+
+accounts:
+  DSV: NPRD
+  HMG: NPRD
+  PRD: PRD
+
+artifacts:
+  portal-web:
+    containerPort: 8080
+    healthPath: /healthz
+    replicas: 1
+
+envs:
+  PRD:
+    gitops:
+      repository: minha-org/ambientes
+      branch: main
+      mode: pr                           # producao: o merge do PR (revisado) e o deploy
+    artifacts:
+      portal-web:
+        replicas: 3

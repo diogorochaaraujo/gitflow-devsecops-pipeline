@@ -1,11 +1,19 @@
-# Onde e como o artefato roda em cada ambiente. Base em `artifacts`,
-# sobrescrita por ambiente em `envs.<ENV>.<artefato>` (merge profundo).
-# Detalhe em docs/04-config-as-code.md.
-serverType: kind   # kind = laboratorio efemero no runner | ecs = AWS ECS Fargate
+# Onde e como cada artefato roda em cada ambiente.
+# Valor efetivo = defaults -> envs.<ENV> (driver e ajustes) e
+#                 artifacts.<a> -> envs.<ENV>.artifacts.<a> (merge profundo).
+# Validado contra schemas/deploy-config.schema.json. Referencia: docs/04-config-as-code.md.
+defaults:
+  driver: kubernetes          # kubernetes | gitops-pr | ecs
+  kubernetes:
+    cluster: kind             # kind (efemero, laboratorio) | aks | kubeconfig
+  gitops:
+    repository: ""            # vazio = este repositorio
+    branch: environments      # branch de estado dos ambientes (lida pelo Argo CD/Flux)
+    mode: pr                  # pr (merge = deploy) | commit (direto, so nao produtivo)
 
-# Grupo de contas de cada ambiente. Ambientes nao produtivos dividem uma conta
-# (recursos compartilhados, servicos por ambiente); PRD tem conta propria.
-# No driver ecs, cada grupo usa o papel da variavel AWS_ROLE_ARN_<GRUPO>.
+# Grupo de contas/clusters de cada ambiente. Ambientes nao produtivos dividem a
+# infraestrutura; PRD e isolado. Credencial por grupo: AWS_ROLE_ARN_<GRUPO>,
+# AZURE_CLIENT_ID_<GRUPO>, segredo KUBECONFIG no Environment.
 accounts:
   DSV: NPRD
   TST: NPRD
@@ -19,18 +27,22 @@ artifacts:
     replicas: 1
     cpu: 256
     memory: 512
-    # ecs: cluster compartilhado do grupo de contas; o servico leva o sufixo do ambiente
-    cluster: lab-cluster
 
 envs:
   DSV:
-    web-api:
-      replicas: 1
+    artifacts:
+      web-api:
+        replicas: 1
   HMG:
-    web-api:
-      replicas: 2
+    artifacts:
+      web-api:
+        replicas: 2
   PRD:
-    web-api:
-      replicas: 2
-      cpu: 512
-      memory: 1024
+    # producao entregue por GitOps: o pipeline abre PR na branch de estado; o
+    # merge e o deploy, e quem aplica no cluster e o agente (Argo CD/Flux)
+    driver: gitops-pr
+    artifacts:
+      web-api:
+        replicas: 2
+        cpu: 512
+        memory: 1024

@@ -1,0 +1,45 @@
+name: verify-artifact
+description: >-
+  Antes de qualquer deploy: resolve o digest da imagem e exige attestation de
+  proveniencia assinada pelo workflow de build da plataforma. Imagem construida
+  fora da esteira (na maquina de alguem, por outro workflow) nao passa.
+
+inputs:
+  image:
+    description: imagem:versao
+    required: true
+  signer-workflow:
+    description: <owner>/<repo>/.github/workflows/stage-build.yml da plataforma
+    required: true
+  token:
+    required: true
+
+outputs:
+  digest:
+    value: ${{ steps.verify.outputs.digest }}
+  ref:
+    description: imagem@sha256:... (imutavel)
+    value: ${{ steps.verify.outputs.ref }}
+
+runs:
+  using: composite
+  steps:
+    - id: verify
+      name: Verify Provenance
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        SIGNER: ${{ inputs.signer-workflow }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+        digest=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | tr -d '"')
+        [ -n "$digest" ] || { echo "::error::Imagem $IMAGE nao encontrada no registry."; exit 1; }
+        ref="${IMAGE%:*}@$digest"
+        if ! gh attestation verify "oci://$ref" --repo "$GITHUB_REPOSITORY" --signer-workflow "$SIGNER"; then
+          echo "::error::$IMAGE ($digest) sem attestation valida assinada por $SIGNER."
+          exit 1
+        fi
+        echo "digest=$digest" >> "$GITHUB_OUTPUT"
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
+        echo "Proveniencia verificada: $ref"

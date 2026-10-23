@@ -1,0 +1,122 @@
+# Plataforma / estagio: fecha toda execucao, passe ou falhe.
+#   Audit          -> evidencia estruturada: o que rodou, versao, commit, quem disparou,
+#                     resultado de cada etapa e QUEM APROVOU cada ambiente
+#   Error Analysis -> so em falha: classifica cada erro (scripts/error-hints.tsv) e diz o que fazer
+name: Stage Report
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        type: string
+        required: true
+      version:
+        type: string
+        default: ""
+      results:
+        description: toJSON(needs) do orquestrador
+        type: string
+        required: true
+      platform-repository:
+        type: string
+        default: ""
+      platform-ref:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      failed: ${{ steps.audit.outputs.failed }}
+    steps:
+      - id: audit
+        name: Audit Record
+        env:
+          RESULTS: ${{ inputs.results }}
+          STAGE: ${{ inputs.stage }}
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          approvals=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" \
+            --jq '[.[] | {state, user: .user.login, comment, environments: [.environments[].name]}]' 2>/dev/null || echo '[]')
+          jq -n --argjson needs "$RESULTS" --argjson approvals "$approvals" \
+            --arg stage "$STAGE" --arg version "$VERSION" \
+            --arg repository "$GITHUB_REPOSITORY" --arg ref "$GITHUB_REF" --arg sha "$GITHUB_SHA" \
+            --arg actor "$GITHUB_ACTOR" --arg event "$GITHUB_EVENT_NAME" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '{stage: $stage, version: $version, repository: $repository, ref: $ref, sha: $sha,
+              actor: $actor, event: $event, run_id: $run, attempt: $attempt,
+              timestamp: (now | todate),
+              jobs: ($needs | map_values(.result)),
+              approvals: $approvals}' > audit.json
+          cat audit.json
+          failed=$(jq -r '[.jobs[]] | any(. == "failure" or . == "cancelled")' audit.json)
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          {
+            echo "### $STAGE ${VERSION:+\`$VERSION\`}"
+            echo "| etapa | resultado |"
+            echo "|---|---|"
+            jq -r '.jobs | to_entries[] | "| \(.key) | \(.value) |"' audit.json
+            if [ "$(jq '.approvals | length' audit.json)" -gt 0 ]; then
+              echo; echo "**Aprovacoes:** $(jq -r '[.approvals[] | "\(.user) (\(.state), \(.environments | join(",")))"] | join("; ")' audit.json)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: audit.json
+          retention-days: 90
+
+  error-analysis:
+    name: Error Analysis
+    needs: audit
+    if: needs.audit.outputs.failed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+          sparse-checkout: scripts/error-hints.tsv
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Classify Failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HINTS: .platform/scripts/error-hints.tsv
+        run: |
+          jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --paginate \
+            --jq '.jobs[] | select(.conclusion == "failure") | [.id, .name, ([.steps[] | select(.conclusion == "failure") | .name] | join(", "))] | @tsv')
+          echo "## Analise de erros" >> "$GITHUB_STEP_SUMMARY"
+          while IFS=$'\t' read -r id name steps; do
+            [ -n "$id" ] || continue
+            log=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" 2>/dev/null || true)
+            errors=$(grep -F '##[error]' <<<"$log" | sed -E 's/^[^ ]+ ##\[error\]//' | sort -u | head -15)
+            class="nao classificado"; hint="Ler o log do job; nenhuma regra conhecida casou."
+            while IFS=$'\t' read -r regex c h; do
+              case "$regex" in ''|'#'*) continue ;; esac
+              if grep -qiE "$regex" <<<"$errors"$'\n'"$(tail -n 200 <<<"$log")"; then class=$c; hint=$h; break; fi
+            done < "$HINTS"
+            {
+              echo "### $name"
+              echo "- **step:** ${steps:-?}"
+              echo "- **classe:** $class"
+              echo "- **o que fazer:** $hint"
+              echo '```'
+              echo "${errors:-(sem mensagem ##[error])}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=$name ($class)::$hint"
+          done <<<"$jobs"

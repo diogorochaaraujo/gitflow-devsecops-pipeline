@@ -5,3 +5,4 @@ __pycache__/
 *.sarif
 zap-report*
 audit.json
+.state/

@@ -1,13 +1,16 @@
 name: Prepare
-description: Le a configuracao da aplicacao e calcula a versao do artefato.
+description: Le a configuracao da aplicacao (ja validada) e calcula a versao do artefato.
 
 inputs:
   mode:
     description: snapshot | release
     required: true
   release-type:
-    description: Major | Minor | Patch
+    description: Major | Minor | Patch | auto
     default: Minor
+  ref:
+    description: commit versionado (auto le os commits ate ele)
+    default: HEAD
 
 outputs:
   version:
@@ -28,14 +31,10 @@ runs:
       name: Load Config
       shell: bash
       run: |
-        pipeline=$(yq -o=json -I=0 '.' pipeline.yml)
-        security=$(yq -o=json -I=0 '.' .github/configs/security-config.yml)
-        name=$(jq -r '.env.Name // empty' <<<"$pipeline")
-        [ -n "$name" ] || { echo "::error::pipeline.yml sem env.Name"; exit 1; }
         {
-          echo "pipeline=$pipeline"
-          echo "security=$security"
-          echo "name=$name"
+          echo "pipeline=$(yq -o=json -I=0 '.' pipeline.yml)"
+          echo "security=$(yq -o=json -I=0 '.' .github/configs/security-config.yml)"
+          echo "name=$(yq '.app.name' pipeline.yml)"
         } >> "$GITHUB_OUTPUT"
 
     - id: version
@@ -44,8 +43,9 @@ runs:
       env:
         MODE: ${{ inputs.mode }}
         RELEASE_TYPE: ${{ inputs.release-type }}
+        REF: ${{ inputs.ref }}
         NAME: ${{ steps.config.outputs.name }}
       run: |
-        version=$("$GITHUB_ACTION_PATH/../../../scripts/version.sh" "$MODE" "$RELEASE_TYPE")
+        version=$("$GITHUB_ACTION_PATH/../../../scripts/version.sh" "$MODE" "$RELEASE_TYPE" "$REF")
         echo "version=$version" >> "$GITHUB_OUTPUT"
         echo "### $NAME \`$version\`" >> "$GITHUB_STEP_SUMMARY"

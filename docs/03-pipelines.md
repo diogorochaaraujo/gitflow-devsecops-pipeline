@@ -1,118 +1,79 @@
 # 03 · Pipelines
 
-Quatro gatilhos, quatro pipelines. Os nomes dos jobs seguem os do modelo de
-referência, para facilitar a comparação entre um log e outro.
-
-| Workflow fino | Gatilho | Pipeline | Deploy em |
-|---|---|---|---|
-| `snapshot.yml` | push em qualquer branch exceto `main` | `pipeline-snapshot.yml` | `SnapshotEnvs`, só para `SnapshotBranches` |
-| `start-release.yml` | PR para `main`: aberto, atualizado, label trocado | `pipeline-release-start.yml` | `StartReleaseEnvs` |
-| `finish-release.yml` | PR para `main` fechado com merge | `pipeline-release-finish.yml` | `FinishReleaseEnvs` |
-| `redeploy.yml` | manual (`workflow_dispatch`) | `pipeline-deploy.yml` | o ambiente escolhido |
-
-## Snapshot
+Um orquestrador (`platform.yml`), sempre com os mesmos jobs. O *Resolve* decide
+quais rodam. Os nomes seguem o que aparece na aba Actions.
 
 ```mermaid
 flowchart LR
-  P[Prepare Build] --> SEC[Security<br/>secrets · SAST · SCA · IaC]
-  P --> B[Build/Upload] --> CS[Container Security]
-  SEC & CS --> D[Environment Deploy<br/>Prepare Deploy → DSV]
-  D --> R[Report<br/>Audit · Error Analysis]
+  R["Resolve"] --> S["Security<br/>Secrets · SAST · SCA · IaC"]
+  R --> B["Build<br/>Build/Upload · Container Security"]
+  S & B --> G{"Gate"}
+  G --> ST["Stamp<br/>tag X.Y.Z-N"]
+  ST --> D1["Deploy &lt;etapa&gt;"]
+  D1 --> P["Promote<br/>X.Y.Z"]
+  P --> D2["Deploy release"] & BM["Back-merge"]
+  D2 & BM --> REP["Report<br/>Audit · Error Analysis"]
 ```
 
-| Job | O que faz | Quebra quando |
+## Jobs
+
+| Job | Faz | Falha quando |
 |---|---|---|
-| Prepare Build | lê `pipeline.yml` e `security-config.yml`, calcula `X.Y.Z-N-SNAPSHOT`, decide se a branch faz deploy | config inválida |
-| Security | gitleaks no histórico, semgrep, trivy fs/config, em paralelo | achado acima do gate |
-| Build/Upload | testes, `docker build`, push no registry com SBOM e proveniência | teste ou build falha |
-| Container Security | trivy na imagem publicada | CVE com correção disponível acima do gate |
-| Environment Deploy | só se a branch está em `SnapshotBranches` | rollout não estabiliza ou o `/health` responde outra versão |
-| Report | registro de auditoria sempre; análise de erros se algo falhou | nunca |
+| **Resolve** | valida `pipeline.yml` e `deploy-config.yml` contra o schema; roteia o evento; no PR de release, confere branch em dia e label; calcula a versão | config inválida, branch atrás da base, label ausente ou duplicado |
+| **Security** | gitleaks no histórico, semgrep, trivy (dependências e IaC), em paralelo | achado acima do gate |
+| **Build** | módulo da stack (deps com cache, lint, **testes**), imagem com SBOM e proveniência, **attestation** assinada, scan da imagem por digest | teste, build ou CVE acima do gate |
+| **Gate** | agrega: verde só se todo estágio exigido nesta execução passou. **É o check obrigatório dos rulesets** (`Pipeline / Gate`) | qualquer estágio exigido falhou |
+| **Stamp** | tag anotada `X.Y.Z-N` no commit construído, só depois do Gate | tag já existe em outro commit |
+| **Deploy &lt;etapa&gt;** | `stage-deploy` nos ambientes da etapa, em ordem | veja abaixo |
+| **Promote** | acha a RC, cria `X.Y.Z` no registry **com o mesmo digest** (verificado), tag git e GitHub Release | sem RC no commit; versão já publicada; digest divergente |
+| **Deploy release** | `stage-deploy` nos ambientes de `release` | veja abaixo |
+| **Back-merge** | (gitflow) abre PR `main → integração` | — |
+| **Report** | *Audit* sempre; *Error Analysis* se algo falhou | nunca |
 
-Toda branch ganha build e análise: o feedback de segurança chega no PR da
-tarefa, não depois do merge. Só a branch de integração ocupa o DSV.
+## O deploy por dentro (`stage-deploy`)
 
-## Start Release
+1. **Prepare Deploy** monta a matriz (ambiente × artefato), na ordem pedida, com
+   `defaults` → `envs.<ENV>` e `artifacts.<a>` → `envs.<ENV>.artifacts.<a>`.
+2. **Um job por item**, em série, com `environment: <ENV>` (aprovação, segredos
+   e histórico do ambiente) e `concurrency` por ambiente (dois deploys no mesmo
+   ambiente nunca se cruzam).
+3. Em cada job:
+   - **Verify Artifact**: resolve o digest e roda `gh attestation verify
+     --signer-workflow <plataforma>/stage-build.yml`. Imagem construída fora da
+     plataforma **não é implantada**;
+   - **driver** do ambiente:
 
-```mermaid
-flowchart LR
-  P["Prepare Build<br/>Commits Validations<br/>Get ReleaseType<br/>Versioning"] --> SEC[Security] & B[Build/Upload]
-  B --> CS[Container Security]
-  SEC & CS --> RV{Release Validation}
-  RV -->|verde| ST["Create Release Stamp<br/>tag X.Y.Z-N"]
-  ST --> D[Deploy NPROD<br/>HMG]
-  D --> R[Report]
-  RV -->|vermelho| R
-```
+| Driver | O que faz | Onde o pipeline toca |
+|---|---|---|
+| `kubernetes` | acesso ao cluster (`kind` efêmero, `aks` por OIDC, ou `kubeconfig` do Environment), `kubectl apply`, `rollout status`, **rollback automático** em cluster persistente, smoke test pela versão do `/health` | no cluster |
+| `gitops-pr` | renderiza o manifesto **com o digest** e grava em `envs/<env>/` da branch de estado: `mode: pr` abre PR (o merge **é** o deploy), `mode: commit` grava direto | só no git; o Argo CD/Flux aplica |
+| `ecs` | assume o papel do grupo por OIDC, nova task definition, `update-service`, espera estabilizar | na conta AWS |
 
-| Job | O que faz |
-|---|---|
-| Prepare Build | `validate-pr.sh`: evento é PR, branch não está atrás da base, exatamente um label `Release-*`. Depois calcula `X.Y.Z-N` |
-| Security, Build, Container | iguais ao snapshot, **sem nenhum skip** |
-| Release Validation | agrega os resultados: um job não-verde reprova a release. É o **check obrigatório** da `main` |
-| Create Release Stamp | cria a tag anotada `X.Y.Z-N` no commit da cabeça do PR. É o "carimbo" que o Finish Release procura |
-| Deploy NPROD | entrega a RC nos ambientes de `StartReleaseEnvs` |
-
-Cada push no PR (ou troca de label) reinicia o fluxo e cancela o anterior. As RCs
-anteriores ficam como tags, mas só a do commit final será promovida.
-
-## Finish Release
-
-```mermaid
-flowchart LR
-  RV["Release Validation<br/>acha a RC do commit"] --> PR["Promote Artifact<br/>RC → X.Y.Z, tag, GitHub Release"]
-  PR --> D["Deploy PRD<br/>aguarda aprovação"]
-  PR --> BM["Back-merge<br/>PR main → dsv"]
-  D & BM --> R[Report]
-```
-
-| Job | O que faz |
-|---|---|
-| Release Validation | procura a tag `X.Y.Z-N` que aponta para o commit da cabeça do PR. Sem ela, o PR foi mergeado sem Start Release verde, e para aqui |
-| Promote Artifact | `docker buildx imagetools create`: nova tag `X.Y.Z` para **o mesmo digest** da RC. Cria a tag git `X.Y.Z` no merge commit e a GitHub Release |
-| Deploy | `FinishReleaseEnvs`. O Environment `PRD` segura o job até um revisor aprovar |
-| Back-merge | abre o PR `main → dsv` (ou avisa que já existe) |
-
-No modelo de referência, este é também o momento da **análise Sonar oficial** e
-do **Quality Gate**: a análise roda sobre o código que entrou na `main`.
+   - **DAST** (ZAP baseline) contra o serviço entregue, quando o driver alcança
+     o serviço (`kubernetes`).
 
 ## Redeploy
 
-Reimplanta uma versão que já existe no registry, sem passar por build:
+`redeploy.yml` (manual): `deploy` de uma versão existente (rollback),
+`diff`, `destroy`. Usa o mesmo `stage-deploy`, então passa pela mesma
+verificação de attestation e pela mesma aprovação de Environment.
 
-- `deploy`: volta uma versão (rollback manual) ou reaplica configuração alterada
-  no `deploy-config.yml`;
-- `diff`: mostra o que mudaria;
-- `destroy`: desliga o ambiente.
+## Report
 
-Como usa o mesmo `pipeline-deploy.yml`, um redeploy em PRD também passa pela
-aprovação do Environment.
+**Audit** grava um JSON por execução (etapa, versão, commit, quem disparou,
+resultado de cada job e **quem aprovou cada ambiente**) como artefato de 90
+dias e como resumo do run. É a evidência que se mostra numa auditoria.
 
-## O deploy por dentro
+**Error Analysis** lê os jobs que falharam pela API e **classifica** cada um
+com as regras de `scripts/error-hints.tsv`: processo, configuração, segurança,
+build, deploy, infra ou permissão. Para cada classe, escreve *o que fazer*. É
+determinístico e não depende de modelo de linguagem. Uma regra nova é uma
+linha no arquivo.
 
-`pipeline-deploy.yml` é o único lugar que sabe entregar. Ele recebe ambientes e
-versão, e:
+## Housekeeping
 
-1. **Prepare Deploy**: `render-deploy-matrix.sh` cruza `artifacts` × ambientes
-   pedidos, aplica o bloco `envs.<ENV>` por cima da base e gera a matriz;
-2. **um job por (ambiente, artefato)**, em série (`max-parallel: 1`), cada um com
-   `environment: <ENV>` (aprovação, segredos e histórico de deploy por ambiente)
-   e `concurrency` por ambiente (dois deploys no mesmo ambiente nunca se cruzam);
-3. o **driver** escolhido por `serverType`:
-
-| Driver | Onde | O que faz |
-|---|---|---|
-| `kind` | cluster efêmero no runner | namespace por ambiente, `kubectl apply`, `rollout status`, smoke test que compara a versão do `/health` com a entregue, DAST com ZAP |
-| `ecs` | AWS ECS Fargate | assume o papel do grupo de contas via OIDC, registra nova task definition com a imagem, `update-service`, espera estabilizar (circuit breaker com rollback no serviço) |
-
-## Report: auditoria e análise de erros
-
-Toda execução termina com o job **Audit**, que grava um JSON (pipeline, versão,
-commit, autor, evento, resultado de cada etapa) como artefato e resumo do run.
-No modelo de referência esse evento vai para um coletor central; aqui fica no
-próprio run.
-
-Se algo falhou, **Error Analysis** busca pela API os jobs que quebraram e junta
-as linhas `##[error]` de cada um no resumo. É a primeira coisa a ler antes de
-abrir log: mensagem idêntica em repositórios de stacks diferentes, ou erro sobre
-*cadastro* em vez de *arquivo*, quase sempre é infraestrutura, não código.
+`housekeeping.yml` (agendado, dias úteis) chama `ops-pending-approvals.yml`:
+lista os deploys esperando aprovação há mais de N horas, com a data em que a
+aprovação expira (30 dias), numa **issue única** que se atualiza sozinha e
+fecha quando não há mais nada pendente. Deploy de produção esquecido até
+expirar é uma falha silenciosa comum.

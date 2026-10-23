@@ -1,36 +1,27 @@
 # 05 · DevSecOps
 
-## Gates por momento
+## Gates
 
-| Análise | Ferramenta aqui | Snapshot | Start Release | Finish Release |
+| Análise | Ferramenta | snapshot / verify | candidate | Onde configura |
 |---|---|---|---|---|
-| segredos no histórico | gitleaks | ✅ | ✅ | — |
-| SAST | semgrep (`p/default`, severidade ERROR) | ✅ (pulável) | ✅ obrigatório | — |
-| SCA (dependências) | trivy fs | ✅ (pulável) | ✅ obrigatório | — |
-| IaC (Dockerfile, manifestos) | trivy config | ✅ (pulável) | ✅ obrigatório | — |
-| imagem | trivy image | ✅ (pulável) | ✅ obrigatório | — |
-| DAST | OWASP ZAP baseline contra o ambiente entregue | DSV | HMG | — |
-| qualidade (Sonar) | não incluído | — | — | no modelo de referência, sobre a `main` |
+| segredos (histórico inteiro) | gitleaks | ✅ | ✅ | `security-config.yml` → `secrets` |
+| SAST | semgrep `p/default`, severidade ERROR | ✅ (pulável) | ✅ | `sast` |
+| SCA | trivy fs | ✅ (pulável) | ✅ | `sca.failOn` |
+| IaC (Dockerfile, manifestos) | trivy config | ✅ (pulável) | ✅ | `iac.failOn` |
+| imagem publicada (por digest) | trivy image | ✅ (pulável) | ✅ | `container.failOn` |
+| DAST | ZAP baseline contra o ambiente entregue | DSV | HMG | `dast` |
+| testes | módulo da stack | ✅ obrigatório | ✅ obrigatório | `pipeline.yml` → `build.<stack>.test` |
 
-Cada linha de `security-config.yml` tem `enabled` (roda ou não) e `gate`
-(quebra ou só registra). Comece com `gate: false` num scanner novo, conheça o
-ruído, depois ligue.
+`enabled` liga o scanner; `gate` decide se quebra o build ou só registra. Um
+scanner novo entra com `gate: false`. Depois que o ruído é conhecido, o gate
+liga.
 
-## Classificação da aplicação decide o mínimo
-
-No modelo de referência, o conjunto obrigatório não é escolha do time: vem do
-**catálogo de aplicações**. Uma app classificada como de escopo prioritário (por
-exemplo, exposta à Internet) **precisa** ter SAST, SCA e DAST cadastrados. Se
-faltar cadastro em qualquer um, o build para no `Prepare Build`, em ~2 minutos,
-com os jobs de build e scan aparecendo como *skipped*.
-
-Esse sintoma é o mais importante de reconhecer: **o código nunca compilou**. Não
-adianta mexer em código. O conserto é administrativo (cadastrar a ferramenta,
-ou registrar uma exceção).
+**O gate certo no lugar certo.** Um scanner que só bloqueia na release ensina o
+time a ignorar o aviso durante todo o desenvolvimento, e a release vira a
+primeira vez que alguém olha. Aqui o snapshot roda os mesmos gates. O
+`skipOnSnapshot` existe para o caso pontual, e nunca vale na candidata.
 
 ## Exceções com prazo
-
-Achado aceito não se apaga do scanner: registra-se, **com data para vencer**:
 
 ```yaml
 # .trivyignore.yaml
@@ -41,41 +32,68 @@ vulnerabilities:
     expired_at: 2026-12-31
 ```
 
-Vencido o prazo, o achado volta a quebrar o build sozinho, sem que ninguém
-precise lembrar. No modelo de referência as exceções ficam num registro central,
-consultado em tempo de execução. A vantagem do arquivo versionado é que a
-exceção passa por PR e tem autor.
+Vencido o prazo, o achado volta a quebrar o build sozinho. Num repositório de
+fornecedor, `.trivyignore.yaml` e `security-config.yml` ficam **protegidos por
+regra de push**: o fornecedor propõe a exceção por PR, e quem aprova é o
+cliente (CODEOWNERS).
 
-## Achados que o próprio template encontrou nele mesmo
+## Prova de origem do artefato
 
-Ao rodar o semgrep sobre a primeira versão destes workflows, dois achados
-`ERROR` apareceram. Os dois também existem no modelo de referência:
+```mermaid
+flowchart LR
+  B["stage-build.yml<br/>(plataforma)"] -->|"build + push"| I[("imagem @sha256")]
+  B -->|"attest-build-provenance<br/>(assinatura OIDC)"| A[("attestation")]
+  D["stage-deploy"] -->|"gh attestation verify<br/>--signer-workflow"| A
+  D -->|só se válida| K["ambiente"]
+```
 
-1. **`secrets: inherit`** nos workflows finos: o reusable recebe *todos* os
-   segredos do repositório, inclusive os que não usa. Se o template central for
-   comprometido, leva tudo. Aqui nenhum reusable precisa de segredo, porque o
-   deploy AWS usa OIDC. Por isso a linha foi removida. Quando precisar, passe só
-   o necessário: `secrets: { NOME: ${{ secrets.NOME }} }`.
-2. **Interpolação `${{ }}` dentro de `run:`**: o valor vira código shell antes de
-   rodar. Um nome de branch ou título de PR malicioso executa comandos no runner.
-   Tudo passa por `env:` e é lido como `"$VAR"`.
+- **SBOM e proveniência** (buildx) anexados à imagem;
+- **attestation assinada** com a identidade OIDC do workflow de build: prova
+  *qual workflow, de qual repositório, em qual commit* produziu aquele digest;
+- **todo deploy verifica** antes de aplicar (`verify-artifact`). Uma imagem
+  construída na máquina de alguém ou por um workflow do fornecedor tem
+  attestation ausente ou de outro signatário, e é recusada;
+- **produção recebe o digest**, não a tag. A promoção `RC → X.Y.Z` confere que o
+  digest não mudou.
 
-## Cadeia de suprimentos
+Com a plataforma num repositório separado (o `signer-workflow` fica fora do
+alcance do time da aplicação), isso corresponde a **SLSA Build L3**. Em
+repositório **privado**, attestations exigem GitHub Enterprise Cloud.
 
-- imagem publicada com **SBOM** e **proveniência** (`sbom: true`,
-  `provenance: mode=max`);
-- produção recebe **o mesmo digest** testado em HMG (promoção por tag, sem
-  rebuild);
-- tags imutáveis por ruleset;
-- deploy AWS por **OIDC**, sem chave de acesso guardada;
-- *pendente, de propósito, para o laboratório:* fixar actions e imagens por
-  **SHA** em vez de tag (`actions/checkout@<sha> # v4`) e deixar o Dependabot ou
-  o Renovate atualizar. Ver [07 · Melhorias](07-melhorias.md).
+## Cadeia de suprimentos da própria esteira
+
+A esteira é código de terceiros executando com credenciais. Os incidentes de
+2025–2026 com actions populares (tags reapontadas para versões com ladrão de
+segredos) atingiram quem referenciava **por tag**.
+
+| Medida | Aqui |
+|---|---|
+| actions de terceiros **por SHA** (com a versão em comentário) | todas |
+| imagens de ferramentas **por digest** | gitleaks, semgrep, trivy, zap, actionlint, zizmor |
+| versão nova só depois de **quarentena** | Dependabot com `cooldown: 14` dias; pins escolhidos com ≥ 14 dias de publicados |
+| sem `secrets: inherit` | nenhum reusable recebe segredos que não usa |
+| nada de `${{ }}` dentro de `run:` | tudo por `env:` (evita injeção via nome de branch, título de PR) |
+| `persist-credentials: false` | em todo checkout que não faz push |
+| permissões mínimas por job | `contents: read` por padrão; escrita só onde precisa |
+| `timeout-minutes` em todo job | nenhum job pendurado consumindo runner |
+| a esteira se testa | `platform-ci.yml`: actionlint, **zizmor** (análise de segurança de workflows), shellcheck, testes, schema dos exemplos |
+
+Na organização, a [política de Actions](../governance/actions-policy.json)
+completa o quadro: só actions da própria organização e de uma lista curta,
+**SHA obrigatório**, token padrão só leitura e uma blocklist pronta para
+incidentes.
+
+## OIDC preso ao workflow
+
+Confiar no **repositório** (`repo:org/app:*`) deixa qualquer workflow do repo
+assumir o papel de deploy, inclusive um que o fornecedor escreva. O
+[`governance/oidc/`](../governance/oidc/README.md) inclui `job_workflow_ref` no
+token e prende a confiança ao **workflow de deploy da plataforma, numa versão
+publicada, no ambiente certo**.
 
 ## Responsabilidade sobre os achados
 
-A ferramenta de scan diz *o quê*, não *quem*. O padrão que funciona: **uma issue
-viva por repositório**, com checklist de achados, reescrita a cada scan e fechada
-sozinha quando zera, usando o identificador estável do achado (o mesmo entre
-scans) como chave. Em DEV, exige-se que tudo esteja **mapeado e priorizado**. Em
-HMG e PRD, gate limpo.
+A ferramenta diz *o quê*, não *quem*. Um padrão que funciona é **uma issue viva
+por repositório**: checklist de achados reescrito a cada scan, fechado sozinho
+quando zera, com o identificador estável do achado como chave. Em DEV, exige-se
+que tudo esteja mapeado e priorizado. Em HMG e PRD, gate limpo.

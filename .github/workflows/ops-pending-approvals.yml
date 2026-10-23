@@ -1,0 +1,60 @@
+# Plataforma / operacao: deploys parados esperando aprovacao.
+# Uma aprovacao de Environment expira em 30 dias e o deploy morre sem aviso.
+# Este job mantem UMA issue viva com o que esta pendente e quando expira;
+# fecha a issue sozinho quando nao ha mais nada.
+name: Ops Pending Approvals
+
+on:
+  workflow_call:
+    inputs:
+      older-than-hours:
+        description: so lista o que espera ha mais que isto
+        type: number
+        default: 4
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  report:
+    name: Pending Approvals
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: List and Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOURS: ${{ inputs.older-than-hours }}
+        run: |
+          title="Deploys aguardando aprovacao"
+          now=$(date -u +%s)
+          rows=""
+          # inicio da execucao como referencia: conservador (o job de deploy espera depois disso)
+          while IFS=$'\t' read -r id since; do
+            [ -n "$id" ] || continue
+            t=$(date -u -d "$since" +%s)
+            while IFS= read -r env; do
+              [ -n "$env" ] || continue
+              age_h=$(( (now - t) / 3600 ))
+              [ "$age_h" -ge "$HOURS" ] || continue
+              expires=$(date -u -d "@$(( t + 30 * 86400 ))" +%Y-%m-%d)
+              days_left=$(( (t + 30 * 86400 - now) / 86400 ))
+              url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id"
+              rows+="| $env | ${age_h}h | $expires (${days_left}d) | $url |"$'\n'
+            done < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/pending_deployments" \
+                      --jq '.[].environment.name' 2>/dev/null || true)
+          done < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs?status=waiting&per_page=100" \
+                    --jq '.workflow_runs[] | [.id, .run_started_at] | @tsv')
+
+          issue=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -z "$rows" ]; then
+            echo "Nada pendente ha mais de ${HOURS}h."
+            [ -n "$issue" ] && gh issue close "$issue" -R "$GITHUB_REPOSITORY" -c "Nenhum deploy pendente."
+            exit 0
+          fi
+          body=$(printf '%s\n\n| ambiente | esperando | expira em | execucao |\n|---|---|---|---|\n%s\n_Atualizado em %s pela rotina Housekeeping._' \
+            "Aprovar ou rejeitar em cada execucao. Deploy nao aprovado em 30 dias e cancelado." "$rows" "$(date -u +'%Y-%m-%d %H:%M UTC')")
+          echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$issue" ]; then gh issue edit "$issue" -R "$GITHUB_REPOSITORY" --body "$body"
+          else gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"; fi

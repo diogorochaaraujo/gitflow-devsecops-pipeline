@@ -1,144 +1,114 @@
 # 01 · Arquitetura
 
-## A ideia central: pipeline como produto
+## Pipeline como produto
 
-Num ambiente com dezenas ou centenas de repositórios, deixar cada time escrever
-a própria esteira produz centenas de esteiras diferentes: gates que uns têm e
-outros não, versões de ferramenta divergentes, auditoria impossível. O modelo
-documentado aqui inverte isso:
+Quando cada time (ou cada fornecedor) escreve a própria esteira, o resultado são
+N esteiras diferentes: gates que uns têm e outros não, versões de ferramenta
+divergentes, nenhuma evidência comparável. Aqui a esteira é um **produto da
+plataforma**, consumido por configuração:
 
-- a **camada de plataforma** é um repositório central de *reusable workflows*
-  (`on: workflow_call`), mantido por um time de plataforma. Toda a lógica mora
-  nele: build, versionamento, segurança, deploy, auditoria;
-- cada **repositório de aplicação** carrega só quatro workflows de ~15 linhas,
-  que dizem *quando* rodar e chamam a plataforma, e três arquivos de configuração
-  que dizem *o quê* construir e *onde* entregar.
+| Camada | O que é | Muda quando |
+|---|---|---|
+| **Aplicação** | `ci-cd.yml` (~20 linhas: gatilhos e permissões) + `pipeline.yml` + `deploy-config.yml` | o time da aplicação precisa de algo diferente *dentro do que o contrato permite* |
+| **Orquestrador** | `platform.yml`: roteia o evento para os estágios certos | muda o modelo de entrega |
+| **Estágios** | `stage-security`, `stage-build`, `stage-release`, `stage-deploy`, `stage-report` (reusable workflows) | muda uma etapa para todo mundo |
+| **Módulos** | `build-<stack>`, `build-container`, `verify-artifact`, `deploy-<driver>` (composite actions) | entra uma stack ou um alvo de deploy novo |
+| **Governança** | rulesets, política de Actions, OIDC, propriedades da org | muda a regra do jogo |
 
 ```mermaid
 flowchart TB
-  subgraph APP["repositório da aplicação (time da app)"]
-    W1["snapshot.yml"] & W2["start-release.yml"] & W3["finish-release.yml"] & W4["redeploy.yml"]
-    C1["pipeline.yml"] & C2["deploy-config.yml"] & C3["security-config.yml"]
-  end
-  subgraph PLAT["repositório da plataforma (time de plataforma)"]
-    P1["pipeline-snapshot.yml"] & P2["pipeline-release-start.yml"] & P3["pipeline-release-finish.yml"]
-    P4["pipeline-security.yml"] & P5["pipeline-build.yml"] & P6["pipeline-deploy.yml"] & P7["pipeline-report.yml"]
-    S["scripts/ · templates/ · actions/"]
-  end
-  W1 -->|uses| P1
-  W2 -->|uses| P2
-  W3 -->|uses| P3
-  W4 -->|uses| P6
-  P1 & P2 --> P4 & P5
-  P1 & P2 & P3 --> P6 & P7
-  P1 -.lê.-> C1 & C2 & C3
+  CI["ci-cd.yml"] --> P["platform.yml"]
+  P --> R["Resolve<br/>valida schema · roteia · versiona"]
+  R --> SEC["stage-security"] & B["stage-build"]
+  B --> MB["build-node | build-python | build-java"] --> MC["build-container<br/>SBOM · proveniência · attestation"]
+  SEC & B --> G{"Gate"}
+  G --> REL["stage-release<br/>stamp · promote"]
+  REL --> D["stage-deploy"]
+  D --> V["verify-artifact"] --> MD["deploy-kubernetes | deploy-gitops-pr | deploy-ecs"]
+  P --> REP["stage-report<br/>audit · error analysis"]
 ```
 
-O contrato entre as camadas é **o nome dos arquivos e o formato deles**. O time
-da aplicação não edita workflow; edita YAML de configuração. O time de
-plataforma muda a esteira de todo mundo num lugar só.
+### Por que reusable workflow para estágios e composite action para módulos
 
-## Como o modelo de referência funciona por dentro
-
-Reconstruído a partir das execuções (nomes de jobs, ordem, tempos e saídas dos
-steps), já que o repositório central não é visível a partir dos repositórios de
-aplicação.
-
-**Cada job começa igual:** limpa o runner self-hosted, emite um token de GitHub
-App de vida curta, faz checkout do código da aplicação *e* checkout dos scripts
-da plataforma numa subpasta, e carrega variáveis globais. Os scripts são
-PowerShell, organizados como uma action composta por etapa (`prepare-build`,
-`prepare-security`, `versioning`, `load-app-info`...).
-
-**Runners self-hosted com ferramentas num volume compartilhado.** JDKs, Node,
-Maven, Sonar, scanners e o CLI de IaC ficam num NAS montado em todo runner. Um
-catálogo de versões com data de fim de vida bloqueia runtime vencido.
-
-**Três fontes externas alimentam o pipeline em tempo de execução:**
-
-| Fonte | O que entrega | Efeito |
+| | Reusable workflow (`workflow_call`) | Composite action |
 |---|---|---|
-| catálogo de aplicações | classificação da app: exposição à Internet, criticidade, dados pessoais, regulatório | decide quais scanners são obrigatórios |
-| registro de segurança | cadastro da app nas ferramentas de análise e **exceções com prazo** | sem cadastro, o build para antes de compilar |
-| repositório de configs | parâmetros de IaC por área de negócio | alimenta o deploy |
+| unidade | jobs inteiros, com runner, permissões e `environment` próprios | steps dentro de um job |
+| segredos | recebe explicitamente | não acessa `secrets`; recebe por input |
+| bom para | etapas com fronteira de permissão (build com `id-token`, deploy com aprovação) | variações de *como* fazer um passo (qual stack, qual driver) |
+| limites (GitHub.com, 2026) | 10 níveis de aninhamento, 50 workflows por execução | — |
 
-**A esteira também administra o repositório.** No `Prepare Build`, antes de
-qualquer coisa, ela sincroniza times e permissões, cria ou atualiza os
-Environments (DSV/TST/HMG/PRD) e garante os rulesets: proteção da `main`, tags
-imutáveis e bloqueio de alteração em `.github/workflows` e `CODEOWNERS`. O
-repositório de aplicação não consegue "desligar" a esteira.
+O build fica num reusable workflow **da plataforma** por um motivo de
+segurança: a attestation registra qual workflow construiu a imagem. Com a
+plataforma num repositório separado, a aplicação não consegue alterar esse
+workflow, o que corresponde ao nível **SLSA Build L3**.
 
-**Artefatos em dois repositórios lógicos.** Snapshots e release candidates vão
-para um repositório de artefatos de desenvolvimento. O Finish Release *move* a
-RC aprovada para o repositório de release. Nada é reconstruído para produção.
+### O contrato
 
-## Topologia de contas e o deploy
+O time da aplicação não escreve YAML de workflow. Ele preenche dois arquivos,
+validados contra `schemas/` no primeiro job de toda execução:
 
-O deploy separa **infraestrutura compartilhada** de **aplicação por ambiente**:
+- `pipeline.yml`: **o quê** (nome, stack, como testar) e **por qual fluxo**;
+- `.github/configs/deploy-config.yml`: **onde** (driver, cluster, grupo de
+  contas) e **com que tamanho** (réplicas, CPU, memória) em cada ambiente.
+
+Chave digitada errado, stack inexistente ou driver que não existe falham no
+*Resolve*, em segundos, com o campo e a regra violada. Sem o schema, esse tipo
+de erro só aparecia no meio do build ou do deploy.
+
+## Topologia de ambientes
+
+O deploy separa **infraestrutura compartilhada** de **aplicação por ambiente**.
+É o desenho mais comum em nuvem corporativa:
 
 ```mermaid
 flowchart LR
-  subgraph NPRD["conta não-produtiva"]
-    ALB1["ALB interno<br/>(compartilhado)"] --> T1["service web-api-dsv"] & T2["service web-api-tst"] & T3["service web-api-hmg"]
-    CL1["cluster de containers<br/>(compartilhado)"]
-    DB1[("cluster de banco<br/>uma base por ambiente")]
+  subgraph NPRD["grupo não produtivo (conta/cluster compartilhado)"]
+    I1["ingress / ALB"] --> T1["web-api · dsv"] & T2["web-api · tst"] & T3["web-api · hmg"]
+    DB1[("banco: uma base por ambiente")]
   end
-  subgraph PRD["conta de produção"]
-    ALB2["ALB"] --> T4["service web-api"]
-    DB2[("banco")]
+  subgraph PRD["grupo de produção (isolado)"]
+    I2["ingress / ALB"] --> T4["web-api · prd"]
   end
 ```
 
-- **Uma conta não-produtiva** hospeda DSV, TST e treinamento. Em aplicação só
-  interna, hospeda também HMG. Aplicação exposta à Internet tem HMG e PRD em
-  contas próprias.
-- Na conta compartilhada, **ALB, cluster e cluster de banco são únicos**. Cada
-  ambiente ganha *service/task* próprio, base própria dentro do cluster de banco,
-  credenciais próprias e parâmetros com sufixo `-<env>` (exceto PRD).
-- O ALB roteia **por hostname do ambiente**. Como todas as regras disputam o
-  mesmo listener, cada ambiente declara a própria prioridade de regra no
-  `deploy-config.yml`. Dois ambientes com a mesma prioridade colidem.
-- O nome de cada stack de IaC carrega aplicação, ambiente e artefato:
-  `<prefixo>-<tipo>-<app>-<env>-<artefato>-Stack`.
+- ambientes não produtivos dividem conta ou cluster, cada um com seu namespace,
+  serviço, base e parâmetros;
+- produção é isolada, com credencial e revisores próprios;
+- no `deploy-config.yml`, o mapa `accounts` diz o grupo de cada ambiente. Os
+  drivers escolhem a credencial pelo grupo (`AWS_ROLE_ARN_<GRUPO>`,
+  `AZURE_CLIENT_ID_<GRUPO>`, segredo `KUBECONFIG` do Environment).
 
-Este template modela isso no `deploy-config.yml` com o mapa `accounts`
-(ambiente → grupo de contas). O driver `ecs` assume um papel de deploy diferente
-por grupo (`AWS_ROLE_ARN_NPRD`, `AWS_ROLE_ARN_PRD`).
+### IaC da infraestrutura e deploy da aplicação são esteiras diferentes
 
-### IaC e deploy são esteiras diferentes
-
-| | IaC da infraestrutura | Deploy da aplicação |
+| | IaC da infraestrutura | Deploy da aplicação (este template) |
 |---|---|---|
-| cria | ALB, cluster, banco, filas, buckets | service/task, regra no ALB, parâmetros |
-| roda | uma vez por conta (ou por ambiente, para criar usuários de banco) | a cada versão entregue |
-| versão | construtos de IaC versionados por major; o pipeline escolhe a faixa compatível | a versão do artefato |
-
-O driver `ecs` deste template assume a infraestrutura criada e só troca a
-imagem. O driver `kind` cria tudo a cada execução, porque o cluster morre com o
-runner.
+| cria | cluster, rede, ingress, banco, filas | Deployment/Service (ou task), configuração do ambiente |
+| roda | quando a infraestrutura muda | a cada versão entregue |
+| dono | plataforma/infra | plataforma (a aplicação só configura) |
 
 ## Separando as camadas
 
-1. Crie um repositório `pipeline-platform` com `.github/workflows/pipeline-*.yml`,
-   `.github/actions/`, `scripts/` e `templates/`, e publique uma tag (`v1`).
-2. No repositório da aplicação, apague esses arquivos e aponte os quatro
-   workflows finos para lá:
+No laboratório tudo está num repositório. Em produção:
+
+1. repositório `pipeline-platform` com `platform.yml`, `stage-*.yml`,
+   `ops-*.yml`, `.github/actions/`, `scripts/`, `templates/`, `schemas/`,
+   publicado com tags `vX.Y.Z` e *immutable releases*;
+2. cada aplicação fica só com `ci-cd.yml`, `redeploy.yml`, `housekeeping.yml` e
+   a configuração, chamando a plataforma **por SHA**:
 
    ```yaml
    jobs:
-     snapshot:
-       uses: <org>/pipeline-platform/.github/workflows/pipeline-snapshot.yml@v1
+     pipeline:
+       uses: minha-org/pipeline-platform/.github/workflows/platform.yml@<sha> # v2.1.0
        with:
-         platform-repository: <org>/pipeline-platform
-         platform-ref: v1
+         platform-repository: minha-org/pipeline-platform
+         platform-ref: <sha>
    ```
 
-3. Se o `pipeline-platform` for privado: em *Settings → Actions → General →
-   Access*, libere o acesso para os repositórios da organização.
+3. o Dependabot propõe a atualização do SHA (com quarentena de 14 dias), e a
+   aplicação adota a versão nova por PR.
 
 `platform-repository`/`platform-ref` existem porque um reusable workflow não
-sabe de onde veio. Os jobs precisam fazer checkout dos scripts da plataforma
-explicitamente (o modelo de referência resolve isso com uma action que lê o
-`job_workflow_ref`). Dentro da plataforma, `uses: ./.github/workflows/x.yml`
-resolve para o mesmo commit do workflow que chama, então os reusables aninhados
-continuam funcionando.
+sabe de onde veio, e os jobs precisam dos scripts da plataforma. Dentro da
+plataforma, `uses: ./.github/workflows/x.yml` resolve para o mesmo commit do
+chamador, então os estágios aninhados seguem a versão escolhida.

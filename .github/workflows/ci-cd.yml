@@ -1,0 +1,37 @@
+# Camada da aplicacao: o unico workflow de pipeline do repositorio.
+# So gatilhos e permissoes; o fluxo (gitflow ou trunk) e escolhido no pipeline.yml.
+# Num repositorio de fornecedor, este arquivo e protegido por regra de push
+# (governance/rulesets/arquivos-plataforma.json): mudar a esteira e PR da plataforma.
+name: Pipeline
+run-name: ${{ github.event.pull_request && format('PR {0} {1}', github.event.pull_request.number, github.event.action) || format('push {0}', github.ref_name) }}
+
+on:
+  push:
+    # branches de estado do GitOps e de PR de deploy nao sao codigo
+    branches-ignore: [environments, "deploy/**"]
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled, closed]
+
+concurrency:
+  # um push novo cancela a verificacao anterior da mesma branch/PR;
+  # a main e o fechamento do PR (promocao) nunca sao cancelados
+  group: pipeline-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'closed' && 'closed' || 'open' }}
+  cancel-in-progress: ${{ github.event.action != 'closed' && github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  actions: read
+  id-token: write
+  attestations: write
+
+jobs:
+  pipeline:
+    name: Pipeline
+    uses: ./.github/workflows/platform.yml
+    # Plataforma em repositorio separado, pinada por SHA (o Dependabot atualiza):
+    # uses: <org>/pipeline-platform/.github/workflows/platform.yml@<sha> # v2.1.0
+    # with:
+    #   platform-repository: <org>/pipeline-platform
+    #   platform-ref: <sha>

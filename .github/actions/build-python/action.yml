@@ -1,0 +1,68 @@
+name: build-python
+description: Instala dependencias com cache, roda lint e testes de um projeto Python.
+
+inputs:
+  version:
+    default: "3.12"
+  working-directory:
+    default: "."
+  install:
+    description: Comando de instalacao (vazio = requirements*.txt ou pyproject.toml, se existirem)
+    default: ""
+  lint:
+    default: ""
+  test:
+    description: Comando de teste (vazio = pytest)
+    default: ""
+  require-tests:
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - id: deps
+      name: Dependency Files
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        files=$(ls requirements*.txt pyproject.toml 2>/dev/null | tr '\n' ' ' || true)
+        echo "files=$files" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.version }}
+        cache: ${{ steps.deps.outputs.files != '' && 'pip' || '' }}
+        cache-dependency-path: ${{ inputs.working-directory }}/requirements*.txt
+
+    - name: Install
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CMD: ${{ inputs.install }}
+      run: |
+        python -m pip install --upgrade --quiet pip
+        if [ -n "$CMD" ]; then bash -c "$CMD"
+        elif ls requirements*.txt >/dev/null 2>&1; then for f in requirements*.txt; do pip install --quiet -r "$f"; done
+        elif [ -f pyproject.toml ]; then pip install --quiet -e ".[test]" || pip install --quiet -e .
+        else echo "sem dependencias declaradas"; fi
+
+    - name: Lint
+      if: inputs.lint != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CMD: ${{ inputs.lint }}
+      run: bash -c "$CMD"
+
+    - name: Test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CMD: ${{ inputs.test }}
+        REQUIRE: ${{ inputs.require-tests }}
+      run: |
+        if [ -n "$CMD" ]; then bash -c "$CMD"
+        elif python -c "import pytest" 2>/dev/null; then python -m pytest -q
+        elif [ "$REQUIRE" = true ]; then
+          echo "::error::Nenhum teste: defina build.python.test ou instale pytest nas dependencias."; exit 1
+        else echo "::warning::Nenhum teste executado."; fi

@@ -1,0 +1,194 @@
+# Plataforma / estagio: entrega de uma versao ja publicada, ambiente por ambiente.
+# Usado pelo pipeline (snapshot, candidata, release) e pelo redeploy manual.
+#
+#   Prepare Deploy -> matriz (ambiente x artefato), na ordem pedida
+#   <ENV>          -> verifica a attestation da imagem -> driver -> DAST
+name: Stage Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environments:
+        description: Ambientes, em ordem, separados por virgula (ex. DSV,HMG)
+        type: string
+        required: true
+      version:
+        type: string
+        default: ""
+      command:
+        description: deploy | diff | destroy
+        type: string
+        default: deploy
+      ref:
+        description: Commit de onde vem a deploy-config (vazio = o do evento)
+        type: string
+        default: ""
+      platform-repository:
+        type: string
+        default: ""
+      platform-ref:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:5ccfff9a411743ab2615136a2edd7416bec9ce41572fa94e935df38c14adb2b6
+
+jobs:
+  prepare-deploy:
+    name: Prepare Deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      name: ${{ steps.matrix.outputs.name }}
+      dast: ${{ steps.matrix.outputs.dast }}
+      signer: ${{ steps.matrix.outputs.signer }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+          persist-credentials: false
+      - name: Validate Input
+        if: inputs.command == 'deploy' && inputs.version == ''
+        run: echo "::error::deploy exige uma versao" && exit 1
+      - id: matrix
+        name: Render Matrix
+        env:
+          ENVIRONMENTS: ${{ inputs.environments }}
+          PLATFORM_REPO: ${{ inputs.platform-repository || github.repository }}
+        run: |
+          matrix=$(.platform/scripts/render-deploy-matrix.sh .github/configs/deploy-config.yml "$ENVIRONMENTS")
+          {
+            echo "matrix=$matrix"
+            echo "name=$(yq '.app.name' pipeline.yml)"
+            echo "dast=$(yq -o=json -I=0 '.dast' .github/configs/security-config.yml)"
+            echo "signer=$PLATFORM_REPO/.github/workflows/stage-build.yml"
+          } >> "$GITHUB_OUTPUT"
+          jq . <<<"$matrix"
+
+  deploy:
+    name: ${{ matrix.env }} - ${{ inputs.version || inputs.command }}
+    needs: prepare-deploy
+    if: fromJSON(needs.prepare-deploy.outputs.matrix).include[0] != null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: read
+      attestations: read
+      id-token: write
+    strategy:
+      matrix: ${{ fromJSON(needs.prepare-deploy.outputs.matrix) }}
+      max-parallel: 1
+    # aprovacao, segredos e historico de deploy ficam no GitHub Environment
+    environment:
+      name: ${{ matrix.env }}
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ matrix.env }}-${{ matrix.artifact }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+          persist-credentials: false
+
+      - id: image
+        name: Image Reference
+        if: inputs.version != ''
+        env:
+          NAME: ${{ needs.prepare-deploy.outputs.name }}
+          VERSION: ${{ inputs.version }}
+        run: echo "tag=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$NAME:$VERSION" >> "$GITHUB_OUTPUT"
+
+      - id: verify
+        name: Verify Artifact
+        if: inputs.command == 'deploy'
+        uses: ./.platform/.github/actions/verify-artifact
+        with:
+          image: ${{ steps.image.outputs.tag }}
+          signer-workflow: ${{ needs.prepare-deploy.outputs.signer }}
+          token: ${{ github.token }}
+
+      - name: Deploy (kubernetes)
+        if: matrix.driver == 'kubernetes'
+        uses: ./.platform/.github/actions/deploy-kubernetes
+        with:
+          command: ${{ inputs.command }}
+          app: ${{ matrix.artifact }}
+          env: ${{ matrix.env }}
+          version: ${{ inputs.version }}
+          # kind carrega a imagem por tag; cluster real recebe o digest verificado
+          image: ${{ (matrix.settings.kubernetes.cluster || 'kind') == 'kind' && steps.image.outputs.tag || steps.verify.outputs.ref }}
+          config: ${{ toJSON(matrix.config) }}
+          settings: ${{ toJSON(matrix.settings) }}
+          registry-token: ${{ github.token }}
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+          azure-client-id: ${{ vars[format('AZURE_CLIENT_ID_{0}', matrix.account)] }}
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-subscription-id: ${{ vars[format('AZURE_SUBSCRIPTION_ID_{0}', matrix.account)] }}
+
+      - name: Deploy (gitops-pr)
+        if: matrix.driver == 'gitops-pr'
+        uses: ./.platform/.github/actions/deploy-gitops-pr
+        with:
+          command: ${{ inputs.command }}
+          app: ${{ matrix.artifact }}
+          env: ${{ matrix.env }}
+          version: ${{ inputs.version }}
+          image: ${{ steps.verify.outputs.ref }}
+          config: ${{ toJSON(matrix.config) }}
+          settings: ${{ toJSON(matrix.settings) }}
+          token: ${{ secrets.GITOPS_TOKEN || github.token }}
+
+      - name: Deploy (ecs)
+        if: matrix.driver == 'ecs'
+        uses: ./.platform/.github/actions/deploy-ecs
+        with:
+          command: ${{ inputs.command }}
+          app: ${{ matrix.artifact }}
+          env: ${{ matrix.env }}
+          version: ${{ inputs.version }}
+          image: ${{ steps.verify.outputs.ref }}
+          config: ${{ toJSON(matrix.config) }}
+          settings: ${{ toJSON(matrix.settings) }}
+          role-arn: ${{ vars[format('AWS_ROLE_ARN_{0}', matrix.account)] }}
+          region: ${{ vars.AWS_REGION }}
+
+      # ---- DAST contra o ambiente recem-entregue (so onde o pipeline alcanca o servico) ----
+      - name: Execute DAST
+        if: >-
+          inputs.command == 'deploy' && matrix.driver == 'kubernetes'
+          && fromJSON(needs.prepare-deploy.outputs.dast).enabled
+        env:
+          GATE: ${{ fromJSON(needs.prepare-deploy.outputs.dast).gate }}
+          APP: ${{ matrix.artifact }}
+          ENV_NAME: ${{ matrix.env }}
+          PORT: ${{ matrix.config.containerPort || 8080 }}
+          NAMESPACE: ${{ matrix.settings.kubernetes.namespace || '' }}
+        run: |
+          ns=${NAMESPACE:-$(tr '[:upper:]' '[:lower:]' <<<"$ENV_NAME")}
+          kubectl -n "$ns" port-forward "svc/$APP" 18080:"$PORT" >/dev/null 2>&1 &
+          sleep 3
+          mkdir -p zap && chmod 777 zap
+          flags=(-I); [ "$GATE" = true ] && flags=()
+          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t http://127.0.0.1:18080 -r zap-report.html "${flags[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && inputs.command == 'deploy'
+        with:
+          name: dast-${{ matrix.env }}-${{ matrix.artifact }}-${{ github.run_attempt }}
+          path: zap/zap-report.html
+          if-no-files-found: ignore
