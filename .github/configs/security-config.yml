@@ -1,0 +1,24 @@
+# Gates de seguranca. `enabled` liga o scanner; `gate` decide se um achado
+# quebra o build ou so fica registrado. Excecoes com prazo em .trivyignore.yaml.
+# Detalhe em docs/05-devsecops.md.
+secrets:
+  enabled: true
+  gate: true
+sast:
+  enabled: true
+  gate: true
+sca:
+  enabled: true
+  gate: true
+  failOn: CRITICAL,HIGH
+iac:
+  enabled: true
+  gate: false
+  failOn: CRITICAL,HIGH
+container:
+  enabled: true
+  gate: true
+  failOn: CRITICAL
+dast:
+  enabled: true
+  gate: false

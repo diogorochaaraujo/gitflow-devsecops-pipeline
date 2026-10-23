@@ -1,0 +1,72 @@
+# Manifesto renderizado por scripts/deploy-kind.sh (envsubst).
+# Equivale ao "stack de tarefa de container" do driver ecs: um servico por ambiente.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP}
+  namespace: ${NS}
+  labels:
+    app.kubernetes.io/name: ${APP}
+    app.kubernetes.io/version: "${VERSION}"
+    environment: ${ENV_NAME}
+spec:
+  replicas: ${REPLICAS}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ${APP}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ${APP}
+        app.kubernetes.io/version: "${VERSION}"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ${APP}
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: ${PORT}
+          env:
+            - name: APP_VERSION
+              value: "${VERSION}"
+            - name: APP_ENV
+              value: ${ENV_NAME}
+            - name: PORT
+              value: "${PORT}"
+          readinessProbe:
+            httpGet: {path: "${HEALTH}", port: ${PORT}}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: "${HEALTH}", port: ${PORT}}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: "${CPU}m", memory: "${MEMORY}Mi"}
+            limits: {cpu: "${CPU}m", memory: "${MEMORY}Mi"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${APP}
+  namespace: ${NS}
+spec:
+  selector:
+    app.kubernetes.io/name: ${APP}
+  ports:
+    - port: ${PORT}
+      targetPort: ${PORT}

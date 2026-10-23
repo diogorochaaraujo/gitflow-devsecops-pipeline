@@ -1,0 +1,29 @@
+# Camada da aplicacao: so gatilho e permissoes. A logica esta em pipeline-snapshot.yml.
+name: Snapshot
+run-name: Snapshot ${{ github.ref_name }}
+
+on:
+  # qualquer branch exceto main; tags nao disparam (so branches-ignore definido)
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: snapshot-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+  id-token: write
+
+jobs:
+  snapshot:
+    name: Snapshot
+    uses: ./.github/workflows/pipeline-snapshot.yml
+    # Repositorio da plataforma separado:
+    # uses: <org>/pipeline-platform/.github/workflows/pipeline-snapshot.yml@v1
+    # with:
+    #   platform-repository: <org>/pipeline-platform
+    #   platform-ref: v1

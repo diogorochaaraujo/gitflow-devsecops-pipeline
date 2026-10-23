@@ -1,0 +1,152 @@
+# Camada da plataforma: deploy de uma versao ja publicada em um ou mais ambientes.
+# Usado pelo snapshot, pelas duas metades do release e pelo redeploy manual.
+name: Pipeline Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environments:
+        description: Ambientes separados por virgula (ex. HMG,PRD)
+        type: string
+        required: true
+      version:
+        type: string
+        default: ''
+      command:
+        description: deploy | diff | destroy
+        type: string
+        default: deploy
+      ref:
+        description: Commit de onde vem a deploy-config (vazio = o do evento)
+        type: string
+        default: ''
+      platform-repository:
+        type: string
+        default: ''
+      platform-ref:
+        type: string
+        default: ''
+
+env:
+  ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:2.15.0
+
+jobs:
+  prepare-deploy:
+    name: Prepare Deploy
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      name: ${{ steps.matrix.outputs.name }}
+      dast: ${{ steps.matrix.outputs.dast }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+      - name: Validate Input
+        if: inputs.command == 'deploy' && inputs.version == ''
+        run: echo "::error::deploy exige uma versao" && exit 1
+      - id: matrix
+        name: Render Matrix
+        env:
+          ENVIRONMENTS: ${{ inputs.environments }}
+        run: |
+          matrix=$(.platform/scripts/render-deploy-matrix.sh .github/configs/deploy-config.yml "$ENVIRONMENTS")
+          {
+            echo "matrix=$matrix"
+            echo "name=$(yq '.env.Name' pipeline.yml)"
+            echo "dast=$(yq -o=json -I=0 '.dast' .github/configs/security-config.yml)"
+          } >> "$GITHUB_OUTPUT"
+          jq . <<<"$matrix"
+
+  deploy:
+    name: ${{ matrix.env }} - ${{ inputs.version || inputs.command }}
+    needs: prepare-deploy
+    if: fromJSON(needs.prepare-deploy.outputs.matrix).include[0] != null
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix: ${{ fromJSON(needs.prepare-deploy.outputs.matrix) }}
+      max-parallel: 1
+    # aprovacao, segredos e historico de deploy ficam no GitHub Environment
+    environment:
+      name: ${{ matrix.env }}
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ matrix.env }}-${{ matrix.artifact }}
+      cancel-in-progress: false
+    env:
+      APP: ${{ matrix.artifact }}
+      ENV_NAME: ${{ matrix.env }}
+      VERSION: ${{ inputs.version }}
+      COMMAND: ${{ inputs.command }}
+      IMAGE_NAME: ${{ needs.prepare-deploy.outputs.name }}
+      CONFIG: ${{ toJSON(matrix.config) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+
+      - name: Image Reference
+        if: inputs.version != ''
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE_NAME:$VERSION" >> "$GITHUB_ENV"
+
+      # ---- driver kind: cluster efemero no runner (laboratorio) ----
+      - name: Create Cluster
+        if: matrix.serverType == 'kind'
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: lab
+
+      - name: Load Image
+        if: matrix.serverType == 'kind' && inputs.version != ''
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "$IMAGE"
+          kind load docker-image "$IMAGE" --name lab
+
+      - name: Execute Deploy (kind)
+        if: matrix.serverType == 'kind'
+        run: .platform/scripts/deploy-kind.sh "$COMMAND"
+
+      # ---- driver ecs: papel de deploy por grupo de contas (OIDC, sem chave fixa) ----
+      - name: Assume Deploy Role
+        if: matrix.serverType == 'ecs'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars[format('AWS_ROLE_ARN_{0}', matrix.account)] }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Execute Deploy (ecs)
+        if: matrix.serverType == 'ecs'
+        run: .platform/scripts/deploy-ecs.sh "$COMMAND"
+
+      # ---- DAST contra o ambiente recem-entregue ----
+      - name: Execute DAST
+        if: >-
+          inputs.command == 'deploy' && matrix.serverType == 'kind'
+          && fromJSON(needs.prepare-deploy.outputs.dast).enabled
+        env:
+          GATE: ${{ fromJSON(needs.prepare-deploy.outputs.dast).gate }}
+        run: |
+          ns=$(tr '[:upper:]' '[:lower:]' <<<"$ENV_NAME")
+          port=$(jq -r '.containerPort // 8080' <<<"$CONFIG")
+          kubectl -n "$ns" port-forward "svc/$APP" 18080:"$port" >/dev/null 2>&1 &
+          sleep 3
+          mkdir -p zap && chmod 777 zap
+          flags=(-I); [ "$GATE" = true ] && flags=()
+          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t http://127.0.0.1:18080 -r zap-report.html "${flags[@]}"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.command == 'deploy'
+        with:
+          name: dast-${{ matrix.env }}-${{ github.run_attempt }}
+          path: zap/zap-report.html
+          if-no-files-found: ignore

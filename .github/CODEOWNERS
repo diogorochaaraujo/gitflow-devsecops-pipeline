@@ -1,0 +1,9 @@
+# Dono padrao do repositorio. Num time, troque por @org/time-mantenedor.
+* @diogorochaaraujo
+
+# Arquivos da plataforma: em producao ficam sob outro time e protegidos por
+# regra de push (docs/02-gitflow.md#protecoes).
+/.github/workflows/pipeline-*.yml @diogorochaaraujo
+/.github/actions/                 @diogorochaaraujo
+/scripts/                         @diogorochaaraujo
+/templates/                       @diogorochaaraujo

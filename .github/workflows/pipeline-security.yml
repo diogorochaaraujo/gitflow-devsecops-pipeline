@@ -1,0 +1,106 @@
+# Camada da plataforma: analises estaticas do codigo-fonte, em paralelo ao build.
+# Cada scanner liga/desliga e quebra/registra conforme .github/configs/security-config.yml.
+name: Pipeline Security
+
+on:
+  workflow_call:
+    inputs:
+      security:
+        description: security-config.yml em JSON
+        type: string
+        required: true
+      ref:
+        description: Commit analisado
+        type: string
+        required: true
+      skip-sast:
+        type: boolean
+        default: false
+      skip-sca:
+        type: boolean
+        default: false
+
+env:
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.21.2
+  SEMGREP_IMAGE: semgrep/semgrep:1.95.0
+  TRIVY_IMAGE: aquasec/trivy:0.57.1
+
+jobs:
+  secrets:
+    name: Secrets
+    if: fromJSON(inputs.security).secrets.enabled
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Gitleaks (historico completo)
+        env:
+          EXIT_CODE: ${{ fromJSON(inputs.security).secrets.gate && '1' || '0' }}
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo" "$GITLEAKS_IMAGE" \
+            git /repo --redact --no-banner --exit-code "$EXIT_CODE"
+
+  sast:
+    name: SAST
+    if: fromJSON(inputs.security).sast.enabled && !inputs.skip-sast
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Semgrep
+        env:
+          GATE: ${{ fromJSON(inputs.security).sast.gate }}
+        run: |
+          set +e
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan --config p/default --metrics off --severity ERROR \
+            --sarif --output semgrep.sarif --error
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$GATE" = true ]; then
+            echo "::error::SAST encontrou achados de severidade ERROR."
+            exit "$rc"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sast-${{ github.run_attempt }}
+          path: semgrep.sarif
+          if-no-files-found: ignore
+
+  sca:
+    name: SCA
+    if: fromJSON(inputs.security).sca.enabled && !inputs.skip-sca
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Trivy (dependencias)
+        env:
+          SEVERITY: ${{ fromJSON(inputs.security).sca.failOn }}
+          EXIT_CODE: ${{ fromJSON(inputs.security).sca.gate && '1' || '0' }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            fs --scanners vuln --ignore-unfixed --severity "$SEVERITY" \
+            --ignorefile .trivyignore.yaml --exit-code "$EXIT_CODE" .
+
+  iac:
+    name: IaC
+    if: fromJSON(inputs.security).iac.enabled && !inputs.skip-sca
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Trivy (Dockerfile, manifestos)
+        env:
+          SEVERITY: ${{ fromJSON(inputs.security).iac.failOn }}
+          EXIT_CODE: ${{ fromJSON(inputs.security).iac.gate && '1' || '0' }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            config --skip-check-update --severity "$SEVERITY" --ignorefile .trivyignore.yaml \
+            --exit-code "$EXIT_CODE" .

@@ -1,0 +1,19 @@
+# Contrato de build da aplicacao: o que a plataforma precisa saber para
+# construir, testar e entregar este repositorio. Pertence ao time da aplicacao.
+# Detalhe de cada campo em docs/04-config-as-code.md.
+env:
+  Name: web-api                      # nome do artefato (imagem, servico, stack)
+  SkipSastOnSnapshot: false          # pula SAST no snapshot (nunca na release)
+  SkipScaOnSnapshot: false           # pula SCA/IaC no snapshot (nunca na release)
+  SkipContainerScanOnSnapshot: false # pula scan da imagem no snapshot (nunca na release)
+
+build:
+  context: app
+  dockerfile: app/Dockerfile
+  test: python3 -m unittest discover -s app -v
+
+deploy:
+  SnapshotBranches: dsv              # so estas branches fazem deploy no snapshot
+  SnapshotEnvs: DSV                  # push na branch de integracao
+  StartReleaseEnvs: HMG              # PR de release aberto/atualizado
+  FinishReleaseEnvs: PRD             # PR de release mergeado

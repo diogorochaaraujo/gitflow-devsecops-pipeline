@@ -1,0 +1,36 @@
+# Onde e como o artefato roda em cada ambiente. Base em `artifacts`,
+# sobrescrita por ambiente em `envs.<ENV>.<artefato>` (merge profundo).
+# Detalhe em docs/04-config-as-code.md.
+serverType: kind   # kind = laboratorio efemero no runner | ecs = AWS ECS Fargate
+
+# Grupo de contas de cada ambiente. Ambientes nao produtivos dividem uma conta
+# (recursos compartilhados, servicos por ambiente); PRD tem conta propria.
+# No driver ecs, cada grupo usa o papel da variavel AWS_ROLE_ARN_<GRUPO>.
+accounts:
+  DSV: NPRD
+  TST: NPRD
+  HMG: NPRD
+  PRD: PRD
+
+artifacts:
+  web-api:
+    containerPort: 8080
+    healthPath: /health
+    replicas: 1
+    cpu: 256
+    memory: 512
+    # ecs: cluster compartilhado do grupo de contas; o servico leva o sufixo do ambiente
+    cluster: lab-cluster
+
+envs:
+  DSV:
+    web-api:
+      replicas: 1
+  HMG:
+    web-api:
+      replicas: 2
+  PRD:
+    web-api:
+      replicas: 2
+      cpu: 512
+      memory: 1024

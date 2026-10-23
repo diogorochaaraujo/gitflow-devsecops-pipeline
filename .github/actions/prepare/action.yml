@@ -1,0 +1,51 @@
+name: Prepare
+description: Le a configuracao da aplicacao e calcula a versao do artefato.
+
+inputs:
+  mode:
+    description: snapshot | release
+    required: true
+  release-type:
+    description: Major | Minor | Patch
+    default: Minor
+
+outputs:
+  version:
+    value: ${{ steps.version.outputs.version }}
+  name:
+    value: ${{ steps.config.outputs.name }}
+  pipeline:
+    description: pipeline.yml em JSON
+    value: ${{ steps.config.outputs.pipeline }}
+  security:
+    description: security-config.yml em JSON
+    value: ${{ steps.config.outputs.security }}
+
+runs:
+  using: composite
+  steps:
+    - id: config
+      name: Load Config
+      shell: bash
+      run: |
+        pipeline=$(yq -o=json -I=0 '.' pipeline.yml)
+        security=$(yq -o=json -I=0 '.' .github/configs/security-config.yml)
+        name=$(jq -r '.env.Name // empty' <<<"$pipeline")
+        [ -n "$name" ] || { echo "::error::pipeline.yml sem env.Name"; exit 1; }
+        {
+          echo "pipeline=$pipeline"
+          echo "security=$security"
+          echo "name=$name"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: version
+      name: Versioning
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        RELEASE_TYPE: ${{ inputs.release-type }}
+        NAME: ${{ steps.config.outputs.name }}
+      run: |
+        version=$("$GITHUB_ACTION_PATH/../../../scripts/version.sh" "$MODE" "$RELEASE_TYPE")
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "### $NAME \`$version\`" >> "$GITHUB_STEP_SUMMARY"

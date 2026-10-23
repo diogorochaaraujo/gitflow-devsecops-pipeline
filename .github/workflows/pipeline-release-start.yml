@@ -1,0 +1,138 @@
+# Camada da plataforma: PR da branch de integracao para a main.
+#
+#   Prepare (valida PR, versiona) --+--> Security ---------------------+
+#                                   +--> Build/Upload --> Container ---+--> Release Validation
+#                                                                              |
+#                                               Release Stamp (tag X.Y.Z-N) <--+
+#                                                      |
+#                                               Deploy NPROD (HMG) --> Report
+#
+# A tag da release candidate so nasce depois de todos os gates. E ela que o
+# Finish Release procura para saber o que promover.
+name: Pipeline Release Start
+
+on:
+  workflow_call:
+    inputs:
+      platform-repository:
+        type: string
+        default: ''
+      platform-ref:
+        type: string
+        default: ''
+
+jobs:
+  prepare:
+    name: Prepare Build
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      name: ${{ steps.prep.outputs.name }}
+      pipeline: ${{ steps.prep.outputs.pipeline }}
+      security: ${{ steps.prep.outputs.security }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.platform-repository || github.repository }}
+          ref: ${{ inputs.platform-ref || (inputs.platform-repository == '' && github.sha) || '' }}
+          path: .platform
+      - id: validate
+        name: Commits Validations
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: .platform/scripts/validate-pr.sh
+      - id: prep
+        uses: ./.platform/.github/actions/prepare
+        with:
+          mode: release
+          release-type: ${{ steps.validate.outputs.release-type }}
+
+  security:
+    name: Security
+    needs: prepare
+    uses: ./.github/workflows/pipeline-security.yml
+    with:
+      security: ${{ needs.prepare.outputs.security }}
+      ref: ${{ github.event.pull_request.head.sha }}
+
+  build:
+    name: Build
+    needs: prepare
+    uses: ./.github/workflows/pipeline-build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      name: ${{ needs.prepare.outputs.name }}
+      pipeline: ${{ needs.prepare.outputs.pipeline }}
+      security: ${{ needs.prepare.outputs.security }}
+      ref: ${{ github.event.pull_request.head.sha }}
+
+  # check obrigatorio da main (ruleset): um unico nome estavel para o branch protection
+  release-validation:
+    name: Release Validation
+    needs: [prepare, security, build]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Gates
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          if ! jq -e 'all(.[]; .result == "success")' <<<"$NEEDS" >/dev/null; then
+            echo "::error::Release reprovada: ha etapa que nao passou (veja Error Analysis)."
+            exit 1
+          fi
+
+  release-stamp:
+    name: Create Release Stamp
+    needs: [prepare, release-validation]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Tag Repository
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # re-run do mesmo run_number: a tag ja existe e as tags sao imutaveis
+          existing=$(git ls-remote --tags origin "refs/tags/$VERSION^{}" | cut -f1)
+          if [ -n "$existing" ]; then
+            [ "$existing" = "$HEAD_SHA" ] && { echo "RC $VERSION ja existe neste commit"; exit 0; }
+            echo "::error::A tag $VERSION ja existe em outro commit ($existing)."; exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" "$HEAD_SHA" -m "release candidate $VERSION" -m "PR #$PR, run $GITHUB_RUN_ID"
+          git push origin "refs/tags/$VERSION"
+          echo "Release candidate \`$VERSION\` em \`$HEAD_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy NPROD
+    needs: [prepare, release-stamp]
+    if: fromJSON(needs.prepare.outputs.pipeline).deploy.StartReleaseEnvs != null
+    uses: ./.github/workflows/pipeline-deploy.yml
+    with:
+      environments: ${{ fromJSON(needs.prepare.outputs.pipeline).deploy.StartReleaseEnvs }}
+      version: ${{ needs.prepare.outputs.version }}
+      ref: ${{ github.event.pull_request.head.sha }}
+      platform-repository: ${{ inputs.platform-repository }}
+      platform-ref: ${{ inputs.platform-ref }}
+
+  report:
+    name: Report
+    needs: [prepare, security, build, release-validation, release-stamp, deploy]
+    if: always()
+    uses: ./.github/workflows/pipeline-report.yml
+    with:
+      pipeline: Start Release
+      version: ${{ needs.prepare.outputs.version }}
+      results: ${{ toJSON(needs) }}

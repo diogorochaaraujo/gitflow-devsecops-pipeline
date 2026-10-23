@@ -1,0 +1,9 @@
+# Excecoes de seguranca aceitas, sempre com prazo e justificativa.
+# Vencido o `expired_at`, o achado volta a quebrar o build sozinho.
+# Formato: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/
+vulnerabilities: []
+#  - id: CVE-0000-00000
+#    paths: ["app/requirements.txt"]
+#    statement: sem correcao publicada; componente nao exposto. Dono: @time-da-app
+#    expired_at: 2026-12-31
+misconfigurations: []

@@ -1,0 +1,25 @@
+# Camada da aplicacao: merge do PR de release promove a RC e entrega em producao.
+name: Finish Release
+run-name: Finish Release PR #${{ github.event.pull_request.number }}
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+concurrency:
+  group: finish-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  actions: read
+  id-token: write
+
+jobs:
+  finish-release:
+    name: Finish Release
+    if: github.event.pull_request.merged == true
+    uses: ./.github/workflows/pipeline-release-finish.yml

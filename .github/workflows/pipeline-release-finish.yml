@@ -1,0 +1,134 @@
+# Camada da plataforma: merge do PR de release na main.
+#
+#   Release Validation (acha a RC) --> Promote (X.Y.Z-N -> X.Y.Z, tag, release)
+#                                         |--> Deploy PRD (aprovacao no Environment)
+#                                         +--> Back-merge (PR main -> integracao)
+#                                                                    --> Report
+#
+# Nada e reconstruido: a imagem que vai para producao e, byte a byte, a que
+# passou pelos gates e pelo HMG. So ganha uma tag nova.
+name: Pipeline Release Finish
+
+on:
+  workflow_call:
+    inputs:
+      platform-repository:
+        type: string
+        default: ''
+      platform-ref:
+        type: string
+        default: ''
+
+jobs:
+  release-validation:
+    name: Release Validation
+    runs-on: ubuntu-24.04
+    outputs:
+      rc: ${{ steps.rc.outputs.rc }}
+      version: ${{ steps.rc.outputs.version }}
+      name: ${{ steps.rc.outputs.name }}
+      prd-envs: ${{ steps.rc.outputs.prd-envs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - id: rc
+        name: Find Release Candidate
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          rc=$(git tag --points-at "$HEAD_SHA" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$' | sort -V | tail -1 || true)
+          if [ -z "$rc" ]; then
+            echo "::error::Nenhuma release candidate aponta para $HEAD_SHA. O Start Release passou neste commit antes do merge?"
+            exit 1
+          fi
+          version=${rc%-*}
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::A versao $version ja foi publicada."
+            exit 1
+          fi
+          echo "RC $rc -> release $version"
+          {
+            echo "rc=$rc"
+            echo "version=$version"
+            echo "name=$(yq '.env.Name' pipeline.yml)"
+            echo "prd-envs=$(yq '.deploy.FinishReleaseEnvs // ""' pipeline.yml)"
+          } >> "$GITHUB_OUTPUT"
+
+  promote:
+    name: Promote Artifact
+    needs: release-validation
+    runs-on: ubuntu-24.04
+    env:
+      RC: ${{ needs.release-validation.outputs.rc }}
+      VERSION: ${{ needs.release-validation.outputs.version }}
+      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      IMAGE_NAME: ${{ needs.release-validation.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Move Artifact to Release
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE_NAME"
+          docker buildx imagetools create --tag "$image:$VERSION" "$image:$RC"
+          docker buildx imagetools inspect "$image:$VERSION" | head -5
+      - name: Generate Release Tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" "$MERGE_SHA" -m "release $VERSION" -m "promovida de $RC (PR #$PR)"
+          git push origin "refs/tags/$VERSION"
+          gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes
+          echo "Release \`$VERSION\` (de \`$RC\`)" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy
+    needs: [release-validation, promote]
+    if: needs.release-validation.outputs.prd-envs != ''
+    uses: ./.github/workflows/pipeline-deploy.yml
+    with:
+      environments: ${{ needs.release-validation.outputs.prd-envs }}
+      version: ${{ needs.release-validation.outputs.version }}
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+      platform-repository: ${{ inputs.platform-repository }}
+      platform-ref: ${{ inputs.platform-ref }}
+
+  # Sem isto o proximo PR de release nasce "1 commit atras da main" (o merge
+  # commit) e o Start Release recusa. Abrir o PR e automatico; mergear, nao.
+  back-merge:
+    name: Back-merge
+    needs: [release-validation, promote]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Open PR main -> integracao
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INTEGRATION: ${{ github.event.pull_request.head.ref }}
+          VERSION: ${{ needs.release-validation.outputs.version }}
+        run: |
+          existing=$(gh pr list -R "$GITHUB_REPOSITORY" --base "$INTEGRATION" --head main --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then echo "PR de back-merge ja aberto: #$existing"; exit 0; fi
+          gh pr create -R "$GITHUB_REPOSITORY" --base "$INTEGRATION" --head main \
+            --title "chore(release): back-merge $VERSION" \
+            --body "Traz o merge da release $VERSION de volta para \`$INTEGRATION\`. Mergear com merge commit, sem squash."
+
+  report:
+    name: Report
+    needs: [release-validation, promote, deploy, back-merge]
+    if: always()
+    uses: ./.github/workflows/pipeline-report.yml
+    with:
+      pipeline: Finish Release
+      version: ${{ needs.release-validation.outputs.version }}
+      results: ${{ toJSON(needs) }}

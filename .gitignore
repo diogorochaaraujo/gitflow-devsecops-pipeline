@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.platform/
+*.sarif
+zap-report*
+audit.json
