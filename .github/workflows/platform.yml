@@ -29,7 +29,7 @@ permissions:
 jobs:
   resolve:
     name: Resolve
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     outputs:
       stage: ${{ steps.route.outputs.stage }}
@@ -74,6 +74,7 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           ACTOR: ${{ github.actor }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PLATFORM_REPO: ${{ inputs.platform-repository || github.repository }}
         run: |
           route=$(PIPELINE=$(yq -o=json -I=0 '.' pipeline.yml) .platform/scripts/resolve.sh)
           echo "$route"
@@ -81,7 +82,16 @@ jobs:
           skip='[]'
           case "$stage" in snapshot|verify) skip=$(yq -o=json -I=0 '.security.skipOnSnapshot // []' pipeline.yml) ;; esac
           { echo "skip=$skip"; echo "head-sha=$HEAD_SHA"; } >> "$GITHUB_OUTPUT"
-          echo "### Etapa: \`$stage\`" >> "$GITHUB_STEP_SUMMARY"
+          # etapa do mapa do processo (docs/00-mapa-do-processo.md), para quem le o run se localizar
+          model=$(yq '.flow.model' pipeline.yml); pre=$(sed -n 's/^pre-envs=//p' <<<"$route")
+          case "$stage" in
+            snapshot)  if [ -n "$pre" ]; then code=E4; else code=E2; fi ;;
+            verify)    code=E2 ;;
+            candidate) if [ "$model" = trunk ]; then code="E6-E10"; else code=E6; fi ;;
+            promote)   code="E8-E10" ;;
+            *)         code="-" ;;
+          esac
+          echo "### Etapa $code · \`$stage\` ([mapa do processo]($GITHUB_SERVER_URL/$PLATFORM_REPO/blob/main/docs/00-mapa-do-processo.md))" >> "$GITHUB_STEP_SUMMARY"
 
       - id: pr
         name: Commits Validations
@@ -149,7 +159,7 @@ jobs:
     # execucao cancelada (ex.: um push mais novo na mesma branch) nao reprova o Gate:
     # pula, e o check vermelho falso nao aparece no PR
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 2
     steps:
       - name: Required Gates
@@ -242,7 +252,7 @@ jobs:
     name: Back-merge
     needs: [resolve, promote]
     if: always() && needs.resolve.outputs.back-merge == 'true' && needs.promote.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       contents: read

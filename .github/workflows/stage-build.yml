@@ -54,7 +54,7 @@ env:
 jobs:
   build:
     name: Build/Upload ${{ inputs.version }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -148,7 +148,7 @@ jobs:
     name: Container Security
     needs: build
     if: inputs.publish && fromJSON(inputs.security).container.enabled && !inputs.skip-container-scan
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: read

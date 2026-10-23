@@ -25,6 +25,10 @@ uma decisão aqui.
 | 14 | **Sem prova de origem** da imagem: o deploy confiava na tag | qualquer imagem com a tag certa no registry seria implantada | attestation no build, verificação no deploy, digest em produção |
 | 15 | **Diff de IaC desligado** por padrão | mudança de infraestrutura entrava sem pré-visualização | `redeploy diff`; em GitOps o diff é o próprio PR |
 | 16 | Rótulo de release **major usado na maioria das releases** | versão perde significado (todo release "quebra compatibilidade") | opção `versioning: conventional`: a versão sai do que mudou |
+| 17 | **Testes e análise de qualidade opcionais no snapshot**, obrigatórios só na release | a release vira o primeiro contato com o gate, e a maioria das candidatas é reprovada | testes obrigatórios em todo build; gates iguais no snapshot | ✅ |
+| 18 | **Validação da aprovação da mudança no fim da release**, depois do merge | a `main` já tem o código quando a mudança é recusada | chamado exigido no PR de release (`changeRef`), antes do merge | ✅ formato; consulta ao sistema como extensão ([10](10-plataforma.md)) |
+| 19 | **Redeploy de produção conferido num serviço externo** de histórico | dependência de um sistema a mais para uma regra simples | política de promoção a partir das tags imutáveis (`check-deploy-policy.sh`) | ✅ |
+| 20 | **Evolução da esteira por fork em outra organização, consumida em `@main`** | isolamento bom no desenvolvimento, mas chegada simultânea a todos e rollback que atinge todos de novo | pré-release em pilotos, tag imutável, adoção por PR ([10](10-plataforma.md)) | ✅ documentado |
 
 ## Para propor primeiro
 

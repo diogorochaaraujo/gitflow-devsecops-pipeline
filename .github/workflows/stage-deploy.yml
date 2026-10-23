@@ -42,7 +42,7 @@ env:
 jobs:
   prepare-deploy:
     name: Prepare Deploy
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -87,10 +87,19 @@ jobs:
       - name: Validate Input
         if: inputs.command == 'deploy' && inputs.version == ''
         run: echo "::error::deploy exige uma versao" && exit 1
+      # antes de qualquer aprovacao: cada ambiente so aceita versoes do seu estagio
+      - name: Deploy Policy
+        if: inputs.command == 'deploy'
+        env:
+          ENVIRONMENTS: ${{ inputs.environments }}
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: PIPELINE=$(yq -o=json -I=0 '.' pipeline.yml) .platform/scripts/check-deploy-policy.sh "$ENVIRONMENTS" "$VERSION"
       - id: matrix
         name: Render Matrix
         env:
           ENVIRONMENTS: ${{ inputs.environments }}
+          VERSION: ${{ inputs.version }}
           PLATFORM_REPO: ${{ inputs.platform-repository || github.repository }}
         run: |
           matrix=$(.platform/scripts/render-deploy-matrix.sh --by-env .github/configs/deploy-config.yml "$ENVIRONMENTS")
@@ -102,6 +111,9 @@ jobs:
             echo "signer=$PLATFORM_REPO/.github/workflows/stage-build.yml"
           } >> "$GITHUB_OUTPUT"
           jq . <<<"$matrix"
+          if [ "$GITHUB_WORKFLOW" = Redeploy ]; then
+            echo "### Etapa E12 · redeploy \`${VERSION:-}\` em $ENVIRONMENTS ([mapa do processo]($GITHUB_SERVER_URL/$PLATFORM_REPO/blob/main/docs/00-mapa-do-processo.md))" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # UM job por ambiente = UMA aprovacao por ambiente. Dentro dele, os artefatos
   # entram em ordem fixa por driver: banco (flyway) antes das aplicacoes; e,
@@ -110,7 +122,7 @@ jobs:
     name: ${{ matrix.env }} - ${{ inputs.version || inputs.command }}
     needs: prepare-deploy
     if: fromJSON(needs.prepare-deploy.outputs.matrix).include[0] != null
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.PIPELINE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     permissions:
       contents: write
