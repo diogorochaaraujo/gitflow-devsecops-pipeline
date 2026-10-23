@@ -105,7 +105,7 @@ CI) ou **local** (reproduzido em Docker durante o desenvolvimento).
 | imagem fora da esteira | `docker build` local, `docker push ghcr.io/<voce>/web-api:9.9.9`, e *Redeploy* `9.9.9` em DSV | *Verify Artifact* recusa: sem attestation do `stage-build.yml` | GitHub (com imagem de uma versão antiga da esteira, sem attestation) |
 | branch atrás da main | hotfix direto na `main` e o PR de release sem trazer a `main` | *Commits Validations*: `N commit(s) atras de main` | local |
 | app que não sobe | faça `route("/health")` devolver `503` | rollout não estabiliza; o job mostra pods e logs | — |
-| migração publicada editada | depois da primeira release, edite `db/migrations/V1__*.sql` | *Resolve*: `Migracao publicada em X.Y.Z foi alterada`; a correção é uma `V2__*.sql` | teste |
+| migração publicada editada | depois da primeira release, edite `db/migrations/V1__*.sql` | *Resolve*: `Migracao publicada em X.Y.Z foi alterada`; a correção é uma `V2__*.sql` | GitHub (recusado em 12 s) + teste |
 | segredo no arquivo de configuração | `DB_PASSWORD=x` em `config/web-api/dsv.env` | o deploy recusa: chave com cara de segredo vai em `secrets` | teste |
 | segredo sem cofre | `secrets: [BANCO]` em `web-api` | o deploy recusa: o ambiente não tem `kubernetes.secretStore` | teste |
 | rollback manual | *Actions → Redeploy*: `deploy`, versão anterior, DSV | entrega a versão antiga **com a configuração e as migrações dela** (commit gravado na imagem), com verificação | GitHub |
