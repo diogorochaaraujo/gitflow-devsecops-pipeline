@@ -1,0 +1,13 @@
+gitflow-devsecops-pipeline
+Copyright 2026 Diogo Rocha de Araujo
+https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline
+
+Este produto inclui software desenvolvido por Diogo Rocha de Araujo
+(https://github.com/diogorochaaraujo), licenciado sob a Apache License 2.0.
+
+Codigo (workflows, actions, scripts, schemas, templates): Apache License 2.0 (LICENSE).
+Documentacao (docs/, README.md, diagramas): Creative Commons Attribution 4.0 (LICENSE-docs).
+
+Pela Apache License 2.0 (secao 4.d), qualquer redistribuicao ou obra derivada
+deve manter este arquivo NOTICE, ou seu conteudo de atribuicao, junto do
+codigo distribuido.

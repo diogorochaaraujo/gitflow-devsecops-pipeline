@@ -1,5 +1,12 @@
 # gitflow-devsecops-pipeline
 
+[![Licença: Apache-2.0](https://img.shields.io/badge/c%C3%B3digo-Apache--2.0-blue.svg)](LICENSE)
+[![Docs: CC BY 4.0](https://img.shields.io/badge/docs-CC%20BY%204.0-lightgrey.svg)](LICENSE-docs)
+[![Platform CI](https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline/actions/workflows/platform-ci.yml/badge.svg?branch=main)](https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline/actions/workflows/platform-ci.yml)
+
+Por **[Diogo Rocha de Araujo](https://github.com/diogorochaaraujo)**, engenharia
+de plataforma, DevOps e DevSecOps.
+
 Template **modular** de esteira em GitHub Actions para organizações que
 precisam controlar *como* o código chega à produção, inclusive quando quem
 escreve o código são **vários fornecedores**.
@@ -96,4 +103,24 @@ scripts/tests/run.sh                                  # 64 testes: versão, rote
 scripts/validate-config.sh .                          # pipeline.yml e deploy-config.yml contra o schema
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/zizmorcore/zizmor:1.30.1 --offline .github/
+docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh scripts/governance/*.sh scripts/tests/*.sh
 ```
+
+## Autoria, licença e como dar crédito
+
+Criado e mantido por **[Diogo Rocha de Araujo](https://github.com/diogorochaaraujo)**.
+
+- **Código** (workflows, actions, scripts, schemas, templates):
+  [Apache License 2.0](LICENSE). Pode usar, adaptar e redistribuir, inclusive
+  comercialmente, **mantendo o arquivo [`NOTICE`](NOTICE)** com a atribuição.
+- **Documentação** (`docs/`, README, diagramas): [CC BY 4.0](LICENSE-docs). Pode
+  reutilizar e adaptar **dando o crédito**.
+
+Para dar crédito numa apresentação, documento ou repositório derivado:
+
+> Baseado em [gitflow-devsecops-pipeline](https://github.com/diogorochaaraujo/gitflow-devsecops-pipeline),
+> de Diogo Rocha de Araujo, sob Apache-2.0 / CC BY 4.0.
+
+Também dá para usar o botão **"Cite this repository"** do GitHub ([`CITATION.cff`](CITATION.cff)).
+Usou ou adaptou? Conte numa *issue*: ver o template em uso em outros cenários é
+o que mais ajuda a evoluir ([CONTRIBUTING](CONTRIBUTING.md)).
