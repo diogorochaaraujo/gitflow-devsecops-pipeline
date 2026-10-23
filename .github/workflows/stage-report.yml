@@ -83,6 +83,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+      checks: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -102,8 +103,13 @@ jobs:
           echo "## Analise de erros" >> "$GITHUB_STEP_SUMMARY"
           while IFS=$'\t' read -r id name steps; do
             [ -n "$id" ] || continue
+            # anotacoes do check run (cada ::error:: vira uma) ficam disponiveis assim que o job
+            # termina; o log completo do job so e servido depois que o run inteiro acaba
+            errors=$(gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations" \
+              --jq '.[] | select(.annotation_level == "failure") | .message' 2>/dev/null \
+              | grep -vE '^Process completed with exit code' | sort -u | head -15 || true)
             log=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" 2>/dev/null || true)
-            errors=$(grep -F '##[error]' <<<"$log" | sed -E 's/^[^ ]+ ##\[error\]//' | sort -u | head -15)
+            [ -n "$errors" ] || errors=$(grep -F '##[error]' <<<"$log" | sed -E 's/^[^ ]+ ##\[error\]//' | sort -u | head -15)
             class="nao classificado"; hint="Ler o log do job; nenhuma regra conhecida casou."
             while IFS=$'\t' read -r regex c h; do
               case "$regex" in ''|'#'*) continue ;; esac

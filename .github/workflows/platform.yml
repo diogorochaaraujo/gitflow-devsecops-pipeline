@@ -252,6 +252,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: read
     uses: ./.github/workflows/stage-report.yml
     with:
       stage: ${{ needs.resolve.outputs.stage || 'resolve' }}
