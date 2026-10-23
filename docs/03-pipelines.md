@@ -95,3 +95,7 @@ lista os deploys esperando aprovação há mais de N horas, com a data em que a
 aprovação expira (30 dias), numa **issue única** que se atualiza sozinha e
 fecha quando não há mais nada pendente. Deploy de produção esquecido até
 expirar é uma falha silenciosa comum.
+
+---
+
+[← 02 · Fluxos](02-fluxos.md) · [índice](../README.md#comece-por-aqui) · [04 · Config as code →](04-config-as-code.md)

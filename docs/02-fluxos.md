@@ -88,8 +88,13 @@ pattern*) ou pelo título do PR quando o merge for squash.
 | snapshot / verify | `<próxima minor>-<run>-SNAPSHOT` | só no registry |
 | candidata aprovada nos gates | `X.Y.Z-<run>` | registry + tag git anotada |
 | promoção | `X.Y.Z` (mesmo digest da RC) | registry + tag git + GitHub Release |
+| versão da plataforma | `vX.Y.Z` | tag git; a aplicação pina o SHA dela ([10](10-plataforma.md#neste-repositório)) |
 
 - as tags são imutáveis por ruleset: uma versão publicada não se move nem se apaga;
 - o `-<run>` amarra cada RC à execução que a produziu;
-- se o repositório recebe tags de outro processo, use `vX.Y.Z` lá. O
-  `version.sh` só enxerga `^[0-9]+\.[0-9]+\.[0-9]+$`.
+- o `version.sh` só enxerga `^[0-9]+\.[0-9]+\.[0-9]+$`: tags `vX.Y.Z` (da
+  plataforma, ou de outro processo) não interferem na versão da aplicação.
+
+---
+
+[← 01 · Arquitetura](01-arquitetura.md) · [índice](../README.md#comece-por-aqui) · [03 · Pipelines →](03-pipelines.md)

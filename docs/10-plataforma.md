@@ -21,6 +21,35 @@ promoção e rollback.
    removido continua aceito, e ignorado, por pelo menos uma major. Um rollback de
    aplicação lê o `deploy-config.yml` antigo com a plataforma atual.
 
+## Neste repositório
+
+Plataforma e aplicação dividem o repositório, mas a aplicação **não** usa o
+código da própria branch:
+
+```yaml
+# .github/workflows/ci-cd.yml (também redeploy.yml e housekeeping.yml)
+uses: diogorochaaraujo/gitflow-devsecops-pipeline/.github/workflows/platform.yml@76e17043... # v1.0.0
+```
+
+- **Duas numerações, sem conflito.** `vX.Y.Z` é versão da plataforma;
+  `X.Y.Z` e `X.Y.Z-N` são versões da aplicação. O `version.sh` só enxerga as
+  segundas.
+- **A plataforma sabe qual versão está rodando.** O contexto `github` é do
+  chamador, então *Resolve* e *Prepare Deploy* leem `referenced_workflows` do
+  próprio run e fazem checkout de scripts e actions **no SHA do pino**. O resumo
+  do run e o `audit.json` registram `repositório@sha`.
+- **Mudança na plataforma não se testa sozinha no PR.** O PR que altera
+  `platform.yml` roda a versão pinada; quem testa a mudança é o *Platform CI*
+  (lint, zizmor, testes, permissões, schema). Ela só chega ao pipeline quando
+  um PR **move o pino**, e esse PR é o piloto.
+- **Atualizar** é um PR que troca o SHA e o comentário nos três workflows. O
+  Dependabot abre esse PR sozinho depois da quarentena de 14 dias. Para não
+  esperar, troque à mão.
+- **Copiou o template?** Duas opções: manter o pino neste repositório, que é a
+  separação de verdade (a sua aplicação consome uma plataforma publicada), ou
+  publicar a sua plataforma (`git push origin v1.0.0` e trocar o dono no
+  `uses:`). O [06 · Laboratório](06-laboratorio.md#1-criar-e-preparar) mostra as duas.
+
 ## Como uma mudança na plataforma chega às aplicações
 
 ```mermaid
@@ -85,8 +114,28 @@ script no mesmo ponto (`scripts/check-change.sh`, extensão) que consulta o sist
 de mudanças e exige o chamado em estado aprovado para a janela. Se a mudança só é
 recusada depois do merge, a `main` já tem o código e o problema virou incidente.
 
+### Por que scripts em bash
+
+A lógica de decisão (roteamento, versão, política, matriz, manifesto,
+classificação de erro) está em `scripts/*.sh`, não em YAML nem numa action em
+JavaScript. É uma troca consciente:
+
+- **a favor**: roda igual no runner e na máquina de quem desenvolve, sem build
+  nem dependência; cada regra tem teste (`scripts/tests/run.sh`) e passa por
+  shellcheck;
+- **contra**: bash fica difícil de manter à medida que cresce, e nem todo time
+  de plataforma domina.
+
+Se um script passar de ~150 linhas ou precisar de estrutura de dados de
+verdade, o caminho é reescrevê-lo como action (TypeScript ou Go) com a mesma
+interface. O teste existente vira o critério de aceite.
+
 ### Coleta central de evidências
 
 O `audit.json` de cada execução é a unidade de evidência. Numa organização, um
 passo no *Report* o envia para um coletor central (bucket imutável, SIEM, data
 lake), e as métricas de entrega (DORA) saem de lá, não da interface.
+
+---
+
+[← 09 · Extensão](09-extensao.md) · [índice](../README.md#comece-por-aqui)

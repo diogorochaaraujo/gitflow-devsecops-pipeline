@@ -88,7 +88,9 @@ flowchart LR
 
 ## Separando as camadas
 
-No laboratório tudo está num repositório. Em produção:
+No laboratório tudo está num repositório, e a aplicação já consome a plataforma
+pela tag `v1.0.0`, pinada por SHA ([10 · Neste repositório](10-plataforma.md#neste-repositório)).
+Numa organização:
 
 1. repositório `pipeline-platform` com `platform.yml`, `stage-*.yml`,
    `ops-*.yml`, `.github/actions/`, `scripts/`, `templates/`, `schemas/`,
@@ -100,15 +102,19 @@ No laboratório tudo está num repositório. Em produção:
    jobs:
      pipeline:
        uses: minha-org/pipeline-platform/.github/workflows/platform.yml@<sha> # v2.1.0
-       with:
-         platform-repository: minha-org/pipeline-platform
-         platform-ref: <sha>
    ```
 
 3. o Dependabot propõe a atualização do SHA (com quarentena de 14 dias), e a
    aplicação adota a versão nova por PR.
 
-`platform-repository`/`platform-ref` existem porque um reusable workflow não
-sabe de onde veio, e os jobs precisam dos scripts da plataforma. Dentro da
-plataforma, `uses: ./.github/workflows/x.yml` resolve para o mesmo commit do
-chamador, então os estágios aninhados seguem a versão escolhida.
+Um reusable workflow não sabe de onde veio (o contexto `github` é do
+chamador), e os jobs precisam dos scripts e actions da plataforma. Por isso
+*Resolve* e *Prepare Deploy* leem `referenced_workflows` do próprio run e fazem
+checkout da plataforma no SHA do pino. Dentro da plataforma, `uses:
+./.github/workflows/x.yml` resolve para o mesmo commit de `platform.yml`, então
+os estágios aninhados seguem a versão escolhida. Os inputs `platform-repository`
+e `platform-ref` continuam aceitos, só para forçar outra versão.
+
+---
+
+[← 00 · Mapa do processo](00-mapa-do-processo.md) · [índice](../README.md#comece-por-aqui) · [02 · Fluxos →](02-fluxos.md)
