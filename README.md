@@ -102,8 +102,9 @@ SHA**, e não pelo código da própria branch ([10 · Plataforma](docs/10-plataf
 | política de promoção: snapshot recusado em PRD antes de pedir aprovação | External Secrets num cluster real |
 | Flyway (banco efêmero) antes da API; ConfigMap por ambiente | governança de organização (`apply-org.sh` só em simulação) |
 | rollback com a configuração da própria versão | plataforma e aplicação em **dois** repositórios |
-| plataforma pinada por SHA (`v1.0.0`), com a versão registrada no Audit | aprovação de PRD por uma **segunda pessoa** (*prevent self-review* configurado; até aqui, um aprovador) |
-| aprovação de PRD, análise de erros classificada, Housekeeping | |
+| plataforma pinada por SHA (`v1.0.0`), com a versão registrada no Audit | |
+| separação de funções: PR de release aprovado e PRD aprovado por **outra pessoa**; quem fez o merge não consegue aprovar (*prevent self-review*) | |
+| análise de erros classificada, Housekeeping | |
 
 ## Validação local
 
